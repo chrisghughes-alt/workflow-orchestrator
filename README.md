@@ -15,6 +15,15 @@ no `docs/WORKFLOW.md`, the engine stops, tells you no pipeline is defined, and o
 starter `docs/WORKFLOW.md` for you to customize — so you don't have to write one from a blank page. (It
 never invents a pipeline silently or borrows another project's phases.)
 
+## Why "orchestrator"
+
+The point is composition. A phase can invoke any command, skill, or agent you already use — and you
+chain them into one master workflow. The orchestrator's job is to hold that chain together: it runs the
+phases in your order, makes each one produce its output and clear its gate, and keeps control at every
+handoff so an invoked command, skill, or agent does *its* job and hands back — rather than deciding what
+happens next and running off with your pipeline. That hand-back discipline is the orchestration. The
+example workflows show it best: independent skills and agents composed into a single, governed pipeline.
+
 ## Install
 
 ```text
