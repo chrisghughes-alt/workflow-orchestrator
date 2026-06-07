@@ -42,6 +42,20 @@ See [`docs/authoring-workflows.md`](docs/authoring-workflows.md) for the directi
 semantics, and routing. See [`examples/`](examples/) for a minimal starter plus two real (sanitized)
 pipelines — a compact 5-phase one and an elaborate 13-phase one.
 
+## Great ways to create a workflow
+
+You rarely have to write `docs/WORKFLOW.md` from scratch — the best pipelines are usually distilled
+from work your project already does:
+
+- **Mine your existing project context.** Before (or while) scaffolding, ask Claude to review your
+  project memories (`CLAUDE.md`, memory files) and your `docs/` folder — existing specs, plans, and
+  design docs — and turn the process you already follow into a `docs/WORKFLOW.md`. You get a pipeline
+  grounded in your real conventions instead of a generic template.
+- **Capture a workflow that just went well.** Finished a run you'd want to repeat — even an ad-hoc one
+  you drove by hand, without `/workflow-start`? Ask Claude to write it up as a `docs/WORKFLOW.md` in
+  this orchestrator's format (phases, each with an **Orchestrator directives** subsection). Next time,
+  `/workflow-start` can replay it with the binding rules and consent gates enforced.
+
 ## What's in the box
 
 ```text
