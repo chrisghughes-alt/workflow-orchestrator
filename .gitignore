@@ -1,0 +1,17 @@
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Editors
+.idea/
+.vscode/
+*.swp
+
+# Logs / temp
+*.log
+*.tmp
+
+# Internal planning docs — contain org/vendor identifiers and absolute local paths.
+# Kept locally, never published.
+docs/superpowers/

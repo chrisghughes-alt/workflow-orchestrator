@@ -1,0 +1,9 @@
+{
+  "name": "workflow-orchestrator",
+  "version": "1.0.0",
+  "description": "Generic, project-agnostic pipeline orchestrator. Drives a project's docs/WORKFLOW.md in defined order with binding gates and per-phase output checks via the /workflow-start command.",
+  "author": { "name": "Chris Hughes" },
+  "homepage": "https://github.com/chrisghughes-alt/workflow-orchestrator",
+  "license": "MIT",
+  "keywords": ["workflow", "orchestration", "pipeline", "automation", "command"]
+}
