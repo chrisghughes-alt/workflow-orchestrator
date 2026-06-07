@@ -74,6 +74,11 @@ docs/             authoring guide
 examples/         minimal + two real, sanitized WORKFLOW.md pipelines
 ```
 
+## Related
+
+Custom agents to compose into your pipeline (the `quality-agents:*` references in the examples come from
+here): **[chrisghughes-alt/ClaudeCodeAgents](https://github.com/chrisghughes-alt/ClaudeCodeAgents)**.
+
 ## License
 
 [MIT](LICENSE)
