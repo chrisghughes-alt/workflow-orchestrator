@@ -125,8 +125,9 @@ user said/did, a **severity** (minor/major), and whether **frustration** was voi
 
 1. **Skipped/abandoned** — the user forced a defined phase to be skipped or not run (NOT via a
    `Condition`).
-2. **Reordered/inserted** — phases run out of the defined order, or ad-hoc work done that is no
-   phase in the workflow.
+2. **Reordered/inserted** — phases run out of the defined order (*pure reorder*), or ad-hoc work
+   inserted, whether substituting for a defined phase (*insert-replacing-a-phase*) or adding a
+   step with no corresponding phase.
 3. **Overrode a gate/directive** — pushed past a consent gate differently than defined, or
    changed a phase's `Invoke`/`Output` mid-run (e.g. "skip the review skill this time").
 
@@ -134,8 +135,8 @@ Beyond these three kinds, two **escalation signals** are derived from the logged
 (they drive the suggestion's tier below, not what gets logged): **Repeated** and **voiced
 frustration**, defined under the classification rules.
 
-**NEVER log these — they are the workflow working as designed, or the engine's own rule-driven
-behavior:**
+**NEVER log these — they are the engine executing its own defined control flow, not user-forced
+departures:**
 
 - a `Condition` evaluating false and skipping its phase (loop step a),
 - a `Pre` step failing or short-circuiting a phase, e.g. a credential probe that aborts or
@@ -147,6 +148,8 @@ behavior:**
 - routing through a `Route` table (loop step h).
 
 Log only **user-forced** departures from the written pipeline, never the engine's own behavior.
+(Steps c Invoke and e Post are where user-forced deviations typically arise — those are what you
+log; the list above is what you never log.)
 
 **Classification rules (apply consistently):**
 
@@ -160,7 +163,7 @@ Log only **user-forced** departures from the written pipeline, never the engine'
   never do this," "why is this even here." A merely **situational** override ("skip it this
   time," "not now") is a normal directive override (kind 3) and does NOT set the flag.
 - **Repeated.** A deviation counts as repeated when the **same kind** is logged two or more times
-  in the run, OR the **same phase** is deviated from more than once.
+  in the run, OR the **same phase** is deviated from more than once (regardless of kind).
 
 ---
 
