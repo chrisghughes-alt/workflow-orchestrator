@@ -7,6 +7,7 @@ plugin. It adds two commands:
   fixed set of binding rules: phases run in sequence, every declared output is produced before
   advancing, consent gates block on explicit approval, and the engine keeps control even when an invoked
   sub-skill tries to decide what happens next.
+  When a run ends, if you forced deviations from the pipeline, it offers — unintrusively — to fold them back into your `docs/WORKFLOW.md`.
 - **`/workflow-capture`** builds that `docs/WORKFLOW.md` *for* you — it reviews the Claude session you
   just finished and walks you through authoring a runnable pipeline from it, phase by phase.
 
