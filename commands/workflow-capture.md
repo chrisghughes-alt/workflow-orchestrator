@@ -67,13 +67,16 @@ session-only context.
 2. **Claude memory directory.** This is the file-based memory (`MEMORY.md` index + per-fact
    files). Its absolute path is user- and project-specific, so probe the **conventional
    location** first:
-   `~/.claude/projects/<project-slug>/memory/MEMORY.md`, where `<project-slug>` is the
-   working-directory path with path separators, drive colons, and spaces all replaced by
-   hyphens (e.g. `C:\VS Code Projects\workflow-orchestrator` →
-   `c--VS-Code-Projects-workflow-orchestrator`; match the drive letter case-insensitively).
+   `~/.claude/projects/<project-slug>/memory/MEMORY.md` — expand `~` to the user's home
+   (`%USERPROFILE%` on Windows, `$HOME` elsewhere) and probe with Glob/Read using an absolute
+   path, since a literal `~` will not resolve. The `<project-slug>` is the working-directory
+   path with path separators, drive colons, and spaces all replaced by hyphens per character,
+   so the leading `C:\` becomes `c--` (no leading hyphen) and any resulting double hyphens are
+   preserved, not collapsed. Example: `C:\VS Code Projects\workflow-orchestrator` →
+   `c--VS-Code-Projects-workflow-orchestrator` (match the drive letter case-insensitively).
    If that file is not found, ask the user to confirm or point to the directory rather than
    guessing further. Once located, read `MEMORY.md` and surface the `feedback` and `project`
-   memories (identified by each fact file's `metadata.type` frontmatter) so established
+   memories (identified by the `type:` frontmatter field in each fact file) so established
    preferences, gates, and constraints get baked into the workflow.
 
 ---
@@ -86,10 +89,9 @@ meaningful decision is the user's. For each phase, present the inferred draft an
 
 - **Keep / merge / split / drop** this phase (resolves Stage 1 blurring).
 - **`Invoke`** — which skill(s), or an orchestrator action (`none`). Propose what the session
-  used. **Skill check:** compare each proposed skill name against the available-skills list in
-  your system context; if a name isn't there, flag it as possibly-uninstalled. If no reliable
-  list is available, downgrade to flagging any skill name that was **not actually invoked**
-  during the captured session.
+  used. **Skill check:** if a proposed skill name does not appear in the available-skills list
+  in your system context, flag it as possibly-uninstalled; additionally flag any skill name
+  that was **not actually invoked** during the captured session.
 - **`Output`** — artifact path + commit message, or `none`. Prefer a concrete output where the
   session produced one (it is the engine's advance-blocker), but accept `none` honestly per
   Stage 1.
@@ -121,15 +123,15 @@ Resolve the target path:
      `-WORKFLOW.md` is constant.
 2. **Re-check the chosen path.** Whatever target you resolved in step 1 (default *or*
    user-named), check whether that exact file already exists. If it does and it is not the
-   file the user just chose to augment, return to the *augment vs. rename* decision — **never
-   silently overwrite** an existing file in Stage 5.
+   file the user just chose to augment, return to the *augment vs. rename* decision, so Stage 5
+   only ever writes a path the user has explicitly accepted.
 
 **Augment (merge) semantics.** When merging captured phases into an existing workflow file:
 append the new phases after the existing ones, renumber all phases sequentially, and **rewire
-any `Route` targets** in existing phases that should now point at inserted phases (routes name
-phases by number/name, so an insert without rewiring breaks the pipeline). Present a
-before/after phase list and the list of rewired routes for explicit confirmation before
-writing.
+`Route` targets** accordingly — both any route that referenced a phase by number (renumbering
+shifts the target) and any existing terminal route (e.g. the previously-last phase's `Route`)
+that should now flow into the appended phases. Present a before/after phase list and the list
+of rewired routes for explicit confirmation before writing.
 
 ---
 
