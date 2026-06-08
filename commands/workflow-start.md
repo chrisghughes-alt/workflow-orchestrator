@@ -249,8 +249,8 @@ available; this only sets the default recommendation.
   versioning.
 - **Use `/workflow-capture`.** Point the user to run `/workflow-capture`; since `WORKFLOW_FILE`
   already exists, capture's Stage 4 will offer to update/augment it interactively (there is no
-  `--augment` flag — it is a choice inside the command). Capture works from the **session
-  transcript**: it re-analyzes this conversation (which already contains this run and its
+  `--augment` flag — it is a choice inside the command). Capture works from the **in-context
+  conversation**: it re-analyzes this conversation (which already contains this run and its
   deviations) and interactively folds them in. The engine does not hand capture a deviation log
   or a pre-built diff; it simply hands off, and the user runs capture.
 
