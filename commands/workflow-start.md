@@ -174,6 +174,79 @@ log; the list above is what you never log.)
   later.
 - If the user wants to stop at any phase boundary, acknowledge and preserve state. Work products created so far
   remain committed and available for resumption.
+- However the run ends (full completion or a stop), run the **Workflow-fit suggestion** step
+  below; it stays silent on an exploratory exit and otherwise applies its tiers.
+
+---
+
+## Workflow-fit suggestion (after the run ends)
+
+Run this **once**, after the loop ends, against the deviation log. It is post-pipeline and
+**never blocks completion** — the run's outputs/commits are already done; declining changes
+nothing about the completed run.
+
+**Decide the exit path first, in this order:**
+
+1. **Exploratory exit → silent.** The user disclaimed the pipeline framing itself — they signaled
+   (up front or at any point during the run, per the Exit clauses above) that they only wanted to
+   explore/investigate and did not actually want a governed pipeline run. This is about expressed
+   **intent**, not how many phases were touched. Stay silent. When it is ambiguous whether they
+   disclaimed the pipeline or were genuinely running it and stopped, do NOT treat it as
+   exploratory — fall through to early stop (4).
+2. **Error/stuck exit → silent.** The run ended abnormally — a declared `Output` never
+   materialized, a skill hard-failed, or the loop could not advance. The failure is the story —
+   suppress the suggestion.
+3. **Freshly-scaffolded file → silent.** If `WORKFLOW_FILE` was created by Step 0's missing-file
+   scaffold path **in this same run**, suppress the suggestion — a skeleton the user has not
+   authored yet is not a candidate for adjustment.
+4. **Early stop → gentle.** The user was genuinely running the pipeline (did not disclaim it per
+   1) and chose to stop partway at a phase boundary, including abandoning during a
+   conditional-gate pause. Early stop is evaluated before tiering and **always yields the plain
+   one-liner**, never the escalated prompt, regardless of what the log contains.
+5. **Full completion → tiered.** The pipeline reached its natural end (`current` became null).
+   Apply the tiers below.
+
+**Tiers (full completion only; read from the deviation log):**
+
+- **Empty log → silent.** No deviations, no message. (The common case; keeps disciplined runs
+  noise-free.)
+- **Deviations present, none escalating → plain one-liner, non-blocking.** A single line naming
+  what diverged and offering to fold it in — e.g. *"Heads up: this run skipped Phase 3 (Review)
+  and added an ad-hoc hotfix step. Want to adjust `WORKFLOW_FILE` to match how you actually work?
+  (reply to do it, or ignore this)."* The run just ends; ignoring it does nothing.
+- **Escalation trigger present → dismissible `AskUserQuestion`.** Triggered when the log contains
+  a **Repeated** deviation (same kind or same phase), a **major-severity** deviation, or a
+  **voiced-frustration** flag. Present a soft prompt with explicit choices: **Update inline** /
+  **Use `/workflow-capture`** / **No thanks**. "No thanks" is always present (one-step dismiss).
+
+**If the user engages**, offer the two paths below. In the one-liner tier, a reply that clearly
+expresses intent to update ("yes," "sure," "do it," "let's adjust," "ok let's do it") opens the
+offer; anything else — an explicit decline ("no," "ignore," "skip"), a bare or ambiguous
+acknowledgment ("ok," "got it"), or no reply — ends silently. In the prompt tier, the user picks
+**Update inline** or **Use `/workflow-capture`**. Both paths target the file loaded at Step 0
+(`WORKFLOW_FILE`).
+
+Recommend **Update inline** when every proposed change is a confirmable diff over the existing
+file — a single-field edit within a phase (one `Invoke`/`Output`/`Gate` value), or a clean
+add/remove/reorder of whole phases. Recommend **`/workflow-capture`** when the change needs
+authoring judgment beyond that — splitting a phase's responsibilities, introducing a conditional
+`Route` table, redesigning a gate's condition, or broad restructuring. Both options stay
+available; this only sets the default recommendation.
+
+- **Update inline.** Summarize the logged deviations as concrete proposed edits to
+  `WORKFLOW_FILE`, show them, and write them **only on explicit confirmation** — never silently.
+  When the edits add, remove, or reorder phases, **renumber phases sequentially and rewire
+  affected `Route` targets** (both routes that referenced a phase by number, which a renumber
+  shifts, and any terminal route that should now chain into a new phase), and include the rewired
+  routes in the diff shown for confirmation. On confirmation, commit to the **target project's**
+  repo (no Claude co-author; non-git project → write without committing and say so). This commit
+  is unrelated to this plugin's own versioning.
+- **Use `/workflow-capture`.** Point the user to run `/workflow-capture`; since `WORKFLOW_FILE`
+  already exists, capture's Stage 4 will offer to update/augment it interactively (there is no
+  `--augment` flag — it is a choice inside the command). Capture works from the **session
+  transcript**: it re-analyzes this conversation (which already contains this run and its
+  deviations) and interactively folds them in. The engine does not hand capture a deviation log
+  or a pre-built diff; it simply hands off, and the user runs capture.
 
 ---
 
