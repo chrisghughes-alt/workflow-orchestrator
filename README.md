@@ -86,6 +86,15 @@ A project can hold more than one pipeline. The default file is `docs/WORKFLOW.md
 /workflow-start --file docs/release-WORKFLOW.md cut the 2.0 release
 ```
 
+## Evolving a workflow as you use it
+
+A workflow drifts — the way you actually work moves ahead of what `docs/WORKFLOW.md` says.
+`/workflow-start` watches for that. If you force deviations during a run — skip a phase, reorder, override a
+gate — it ends with an **unintrusive, easily-dismissed** suggestion to fold those changes back in: a
+one-line nudge for small drift, or a quick prompt (update inline, hand off to `/workflow-capture`, or just
+dismiss) when the friction was bigger. Clean runs say nothing. So the pipeline you run tomorrow reflects how
+you worked today.
+
 ## What's in the box
 
 ```text
