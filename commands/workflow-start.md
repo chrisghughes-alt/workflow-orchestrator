@@ -111,6 +111,62 @@ WHILE current is not null:
 
 ---
 
+## Deviation tracking (maintained during the loop)
+
+While the loop above runs, keep an in-context **deviation log** — a running list, no persistence
+(the whole run is in one conversation). Append a one-line entry whenever the user **forces a
+departure from what a phase's directives specified**. This log is read once at the end by the
+*Workflow-fit suggestion* step below; it changes nothing about how the loop itself runs.
+
+Each entry records: the phase, the deviation **kind**, a short near-verbatim note of what the
+user said/did, a **severity** (minor/major), and whether **frustration** was voiced.
+
+**Deviation kinds (these get logged):**
+
+1. **Skipped/abandoned** — the user forced a defined phase to be skipped or not run (NOT via a
+   `Condition`).
+2. **Reordered/inserted** — phases run out of the defined order (*pure reorder*), or ad-hoc work
+   inserted, whether substituting for a defined phase (*insert-replacing-a-phase*) or adding a
+   step with no corresponding phase.
+3. **Overrode a gate/directive** — pushed past a consent gate differently than defined, or
+   changed a phase's `Invoke`/`Output` mid-run (e.g. "skip the review skill this time").
+
+Beyond these three kinds, two **escalation signals** are derived from the logged deviations
+(they drive the suggestion's tier below, not what gets logged): **Repeated** and **voiced
+frustration**, defined under the classification rules.
+
+**NEVER log these — they are the engine executing its own defined control flow, not user-forced
+departures:**
+
+- a `Condition` evaluating false and skipping its phase (loop step a),
+- a `Pre` step failing or short-circuiting a phase, e.g. a credential probe that aborts or
+  forces a fallback (loop step b),
+- the engine applying a `Suppress` directive on a sub-skill's return (loop step d),
+- normal consent given or withheld at a gate, and a conditional gate that correctly blocked
+  (loop step g),
+- the engine blocking advance because a declared `Output` was not produced (loop step f),
+- routing through a `Route` table (loop step h).
+
+Log only **user-forced** departures from the written pipeline, never the engine's own behavior.
+(Steps c Invoke and e Post are where user-forced deviations typically arise — those are what you
+log; the list above is what you never log.)
+
+**Classification rules (apply consistently):**
+
+- **Major vs minor severity.** *Major* = a phase entirely skipped/abandoned (kind 1), a consent
+  gate overridden or bypassed (kind 3, gate), or ad-hoc work substituted for a defined phase
+  (kind 2, insert-replacing-a-phase). *Minor* = the phase still ran and produced its declared
+  output but a directive value was changed mid-phase (kind 3, `Invoke`/`Output` tweak), or phases
+  were reordered without dropping any (kind 2, pure reorder).
+- **Voiced frustration.** Set this flag only when the user expressed a **blanket negative
+  judgment about a phase's existence or utility** — e.g. "this phase is always unnecessary," "we
+  never do this," "why is this even here." A merely **situational** override ("skip it this
+  time," "not now") is a normal directive override (kind 3) and does NOT set the flag.
+- **Repeated.** A deviation counts as repeated when the **same kind** is logged two or more times
+  in the run, OR the **same phase** is deviated from more than once (regardless of kind).
+
+---
+
 ## Exit clauses
 
 - If at any point the user signals they only wanted exploratory work (not a full pipeline run), exit cleanly:
@@ -118,6 +174,85 @@ WHILE current is not null:
   later.
 - If the user wants to stop at any phase boundary, acknowledge and preserve state. Work products created so far
   remain committed and available for resumption.
+- However the run ends (full completion or a stop), run the **Workflow-fit suggestion** step
+  below; it stays silent on exploratory, error, or freshly-scaffolded exits, gives a one-liner on
+  an early stop, and otherwise applies its completion tiers.
+
+---
+
+## Workflow-fit suggestion (after the run ends)
+
+Run this **once**, after the loop ends, against the deviation log. It is post-pipeline and
+**never blocks completion** — the run's outputs/commits are already done; declining changes
+nothing about the completed run.
+
+**Decide the exit path first, in this order:**
+
+1. **Exploratory exit → silent.** The user disclaimed the pipeline framing itself — they signaled
+   (up front or at any point during the run, per the Exit clauses above) that they only wanted to
+   explore/investigate and did not actually want a governed pipeline run. This is about expressed
+   **intent**, not how many phases were touched. Stay silent. When it is ambiguous whether they
+   disclaimed the pipeline or were genuinely running it and stopped, do NOT treat it as
+   exploratory — fall through to early stop (4).
+2. **Error/stuck exit → silent.** The run ended abnormally — a declared `Output` never
+   materialized, a skill hard-failed, or the loop could not advance. The failure is the story —
+   suppress the suggestion.
+3. **Freshly-scaffolded file → silent.** If `WORKFLOW_FILE` was created by Step 0's missing-file
+   scaffold path **in this same run**, suppress the suggestion — a skeleton the user has not
+   authored yet is not a candidate for adjustment.
+4. **Early stop → gentle.** The user was genuinely running the pipeline (did not disclaim it per
+   1) and chose to stop partway at a phase boundary, including abandoning during a
+   conditional-gate pause. Early stop is evaluated before tiering and **always yields the plain
+   one-liner**, never the escalated prompt, regardless of what the log contains. Use the plain
+   one-liner format and engagement protocol below, naming any logged deviations the same way the
+   full-completion one-liner does.
+5. **Full completion → tiered.** The pipeline reached its natural end (`current` became null).
+   Apply the tiers below.
+
+**Tiers (full completion only; read from the deviation log):**
+
+- **Empty log → silent.** No deviations, no message. (The common case; keeps disciplined runs
+  noise-free.)
+- **Deviations present, none escalating → plain one-liner, non-blocking.** A single line naming
+  what diverged and offering to fold it in — e.g. *"Heads up: this run skipped Phase 3 (Review)
+  and added an ad-hoc hotfix step. Want to adjust `WORKFLOW_FILE` to match how you actually work?
+  (reply to do it, or ignore this)."* The run just ends; ignoring it does nothing.
+- **Escalation trigger present → dismissible `AskUserQuestion`.** Triggered when the log contains
+  a **Repeated** deviation (same kind or same phase), a **major-severity** deviation, or a
+  **voiced-frustration** flag. Present a soft prompt with explicit choices: **Update inline** /
+  **Use `/workflow-capture`** / **No thanks**. "No thanks" is always present (one-step dismiss).
+
+**If the user engages**, offer the two paths below. In the one-liner tier, a reply that clearly
+expresses intent to update ("yes," "sure," "do it," "let's adjust," "ok let's do it") opens the
+offer; anything else — an explicit decline ("no," "ignore," "skip"), a bare or ambiguous
+acknowledgment ("ok," "got it"), or no reply — ends silently. In the prompt tier, the user picks
+**Update inline** or **Use `/workflow-capture`**. Both paths target the file loaded at Step 0
+(`WORKFLOW_FILE`).
+
+Recommend **Update inline** when every proposed change is a confirmable diff over the existing
+file — a single-field edit within a phase (one `Invoke`/`Output`/`Gate` value), or a clean
+add/remove/reorder of whole phases. Recommend **`/workflow-capture`** when the change needs
+authoring judgment beyond that — splitting a phase's responsibilities, introducing a conditional
+`Route` table, redesigning a gate's condition, or broad restructuring. Both options stay
+available; this only sets the default recommendation.
+
+- **Update inline.** Summarize the logged deviations as concrete proposed edits to
+  `WORKFLOW_FILE`, show them, and write them **only on explicit confirmation** — never silently.
+  When the edits add, remove, or reorder phases, **renumber phases sequentially and rewire
+  affected `Route` targets** (both routes that referenced a phase by number, which a renumber
+  shifts, and any terminal route that should now chain into a new phase), and include the rewired
+  routes in the diff shown for confirmation. On confirmation, commit to the **target project's**
+  repo — stage only `WORKFLOW_FILE` (never `git add -A`, so unrelated working-tree changes are not
+  swept in); if the tree carries unrelated uncommitted changes that prevent a clean single-file
+  commit, write the file without committing and tell the user. No Claude co-author; a non-git
+  project → write without committing and say so. This commit is unrelated to this plugin's own
+  versioning.
+- **Use `/workflow-capture`.** Point the user to run `/workflow-capture`; since `WORKFLOW_FILE`
+  already exists, capture's Stage 4 will offer to update/augment it interactively (there is no
+  `--augment` flag — it is a choice inside the command). Capture works from the **in-context
+  conversation**: it re-analyzes this conversation (which already contains this run and its
+  deviations) and interactively folds them in. The engine does not hand capture a deviation log
+  or a pre-built diff; it simply hands off, and the user runs capture.
 
 ---
 

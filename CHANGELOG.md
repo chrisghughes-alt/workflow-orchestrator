@@ -3,6 +3,15 @@
 All notable changes to this project are documented here. This project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## [1.2.0] — 2026-06-08
+
+### Added
+- Workflow-fit suggestion on `/workflow-start`: when a run ends and the user forced deviations from the
+  written pipeline, the engine surfaces an unintrusive, easily-dismissed suggestion to adjust the started
+  workflow file — a plain one-liner for minor deviations, or a dismissible prompt (Update inline / use
+  `/workflow-capture` / No thanks) when friction was repeated, a deviation was major, or frustration was
+  voiced. Clean runs stay silent.
+
 ## [1.1.0] — 2026-06-08
 
 ### Added
