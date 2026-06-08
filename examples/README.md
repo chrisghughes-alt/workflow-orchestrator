@@ -20,3 +20,7 @@ from simplest to most elaborate. For the directive format, see
 2. Copy it to your project as `docs/WORKFLOW.md`.
 3. Edit the phases, skills, outputs, and gates to fit your project.
 4. Run `/workflow-start <what you want to build>`.
+
+To keep several pipelines in one project, name extras `docs/<slug>-WORKFLOW.md` and run a specific one with a
+leading `--file` argument: `/workflow-start --file docs/<slug>-WORKFLOW.md <what you want to build>`. With no
+`--file`, `docs/WORKFLOW.md` runs. See [`../docs/authoring-workflows.md`](../docs/authoring-workflows.md).

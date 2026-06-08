@@ -85,6 +85,22 @@ earlier in the run (commonly a "lane" set in a classification phase):
   - default → Phase 3
 ```
 
+## Multiple workflows in one project
+
+A project can hold more than one pipeline. The default file `/workflow-start` runs is `docs/WORKFLOW.md`.
+To keep additional pipelines side by side, name them `docs/<slug>-WORKFLOW.md` (kebab-case slug, constant
+`-WORKFLOW.md` suffix) — e.g. `docs/payments-WORKFLOW.md`, `docs/release-WORKFLOW.md`.
+
+Select a non-default workflow at run time by passing a **leading** `--file` argument:
+
+```text
+/workflow-start --file docs/payments-WORKFLOW.md add refund support
+```
+
+Everything after the path is the work description. With no `--file`, the engine runs `docs/WORKFLOW.md`.
+There is no registry or picker — you select a workflow by passing its exact path. The
+`/workflow-orchestrator:workflow-capture` command can generate these files for you from a finished session.
+
 ## Getting started
 
 1. Copy [`../examples/minimal-WORKFLOW.md`](../examples/minimal-WORKFLOW.md) to your project's
