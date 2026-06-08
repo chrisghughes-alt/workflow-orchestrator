@@ -47,10 +47,12 @@ run; the rest is the work description.
 - Otherwise, `WORKFLOW_FILE = docs/WORKFLOW.md` and `WORK = $ARGUMENTS` in full.
 
 The `--file` flag is recognized **only** in leading position, so a work description that merely contains the
-substring `--file` is treated as plain text.
+substring `--file` is treated as plain text. A path containing spaces must be quoted (e.g.
+``--file "my docs/pipeline.md"``) and the surrounding quotes stripped; otherwise the path token ends at the
+first whitespace.
 
 `WORK` is the work description (feature, bug, or change to start the pipeline on). If `WORK` is empty, ask the
-user to describe the work before Step 0. Throughout the rest of this command, **`WORK` is the value passed to
+user to describe the work before Step 0, then treat their answer as `WORK`. Throughout the rest of this command, **`WORK` is the value passed to
 invoked skills** — never the raw `$ARGUMENTS` (which may still carry the `--file <path>` prefix).
 
 ---
@@ -65,7 +67,7 @@ invoked skills** — never the raw `$ARGUMENTS` (which may still carry the `--fi
   subsection is authoritative for control flow. You need the whole file in context to execute correctly.
 - **If it is missing:** STOP. Tell the user plainly that this project has no pipeline definition
   (`WORKFLOW_FILE` not found — report the resolved path). Use `AskUserQuestion` to offer: **(a)** scaffold a
-  starter `WORKFLOW_FILE` from the embedded skeleton below for them to customize, or **(b)** abort. **NEVER**
+  starter workflow file at `WORKFLOW_FILE` from the embedded skeleton below for them to customize, or **(b)** abort. **NEVER**
   fall back to another project's phases or invent a pipeline — a missing definition means there is no pipeline
   to run.
 
@@ -121,7 +123,7 @@ WHILE current is not null:
 
 ## Embedded starter skeleton (missing-doc scaffold ONLY)
 
-Use this **only** when Step 0 found no `docs/WORKFLOW.md` and the user chose to scaffold. It is a minimal,
+Use this **only** when Step 0 found no `WORKFLOW_FILE` (the resolved path) and the user chose to scaffold. It is a minimal,
 two-phase illustration of the directive format — the user fills in their real pipeline. (Projects that already
 have a `docs/WORKFLOW.md` never touch this.)
 
