@@ -37,23 +37,39 @@ composes:
 
 ## Arguments
 
-`$ARGUMENTS` — the work description (feature, bug, or change to start the pipeline on). If empty, ask the user
-to describe the work before Step 0.
+`$ARGUMENTS` may begin with an optional **leading** `--file <path>` token that selects which workflow file to
+run; the rest is the work description.
+
+**Parse `$ARGUMENTS` before Step 0:**
+
+- If `$ARGUMENTS` begins with `--file` followed by a path token — a single whitespace-delimited token, or a
+  quoted string if the path contains spaces (strip the quotes) — bind that path as `WORKFLOW_FILE` and bind the
+  remaining text as `WORK` (the work description).
+- Otherwise, `WORKFLOW_FILE = docs/WORKFLOW.md` and `WORK = $ARGUMENTS` in full.
+
+The `--file` flag is recognized **only** in leading position, so a work description that merely contains the
+substring `--file` is treated as plain text (e.g. ``--file "my docs/pipeline.md"`` shows the quoting for a
+path that contains spaces).
+
+`WORK` is the work description (feature, bug, or change to start the pipeline on). If `WORK` is empty, ask the
+user to describe the work before Step 0, then treat their answer as `WORK`. Throughout the rest of this command, **`WORK` is the value passed to
+invoked skills** — never the raw `$ARGUMENTS` (which may still carry the `--file <path>` prefix).
 
 ---
 
 ## Step 0 — Load the project pipeline
 
-**Action:** Use the Read tool to read `docs/WORKFLOW.md` (relative to the current project root) **in full**, NOW,
-before anything else.
+**Action:** Use the Read tool to read `WORKFLOW_FILE` (the path resolved from Arguments; default
+`docs/WORKFLOW.md`, relative to the current project root) **in full**, NOW, before anything else.
 
 - **If it exists:** hold it in context. It defines every phase, gate, artifact path, and convention for THIS
   project's pipeline. The phase prose is the human/sub-agent reference; each phase's **Orchestrator directives**
   subsection is authoritative for control flow. You need the whole file in context to execute correctly.
 - **If it is missing:** STOP. Tell the user plainly that this project has no pipeline definition
-  (`docs/WORKFLOW.md` not found). Use `AskUserQuestion` to offer: **(a)** scaffold a starter `docs/WORKFLOW.md`
-  from the embedded skeleton below for them to customize, or **(b)** abort. **NEVER** fall back to another
-  project's phases or invent a pipeline — a missing definition means there is no pipeline to run.
+  (`WORKFLOW_FILE` not found — report the resolved path). Use `AskUserQuestion` to offer: **(a)** scaffold a
+  starter workflow file at `WORKFLOW_FILE` from the embedded skeleton below for them to customize, or **(b)** abort. **NEVER**
+  fall back to another project's phases or invent a pipeline — a missing definition means there is no pipeline
+  to run.
 
 ---
 
@@ -70,9 +86,9 @@ WHILE current is not null:
      Route default and continue.
   b. PRE — run current.Pre steps yourself (the orchestrator runs these, not a sub-skill): e.g. install a tool,
      probe credentials, "drop out of auto mode first." Order-sensitive: these happen BEFORE Invoke.
-  c. INVOKE — call current.Invoke skill(s), in the order listed, with $ARGUMENTS / accumulated context. If
-     Invoke is `none`, perform the orchestrator action the phase's prose describes (e.g. present an inline
-     brief, ask an AskUserQuestion).
+  c. INVOKE — call current.Invoke skill(s), in the order listed, with WORK (the stripped work description) /
+     accumulated context. If Invoke is `none`, perform the orchestrator action the phase's prose describes
+     (e.g. present an inline brief, ask an AskUserQuestion).
   d. SUPPRESS — immediately on the skill's return, apply current.Suppress: ignore the skill's own
      next-step / terminal-state instruction and do exactly what Suppress says. (Binding rule #1 is the floor
      when no Suppress is declared.)
@@ -107,7 +123,7 @@ WHILE current is not null:
 
 ## Embedded starter skeleton (missing-doc scaffold ONLY)
 
-Use this **only** when Step 0 found no `docs/WORKFLOW.md` and the user chose to scaffold. It is a minimal,
+Use this **only** when Step 0 found no `WORKFLOW_FILE` (the resolved path) and the user chose to scaffold. It is a minimal,
 two-phase illustration of the directive format — the user fills in their real pipeline. (Projects that already
 have a `docs/WORKFLOW.md` never touch this.)
 

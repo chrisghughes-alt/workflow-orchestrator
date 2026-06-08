@@ -6,7 +6,7 @@
     {
       "name": "workflow-orchestrator",
       "description": "Generic, project-agnostic pipeline orchestrator: drives a project's docs/WORKFLOW.md in order with binding gates and output checks.",
-      "version": "1.0.0",
+      "version": "1.1.0",
       "source": "./",
       "author": { "name": "Chris Hughes" }
     }
