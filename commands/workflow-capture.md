@@ -168,7 +168,7 @@ After writing, print the exact invocation, in the namespaced form that matches t
 plugin:
 
 - Default file: `/workflow-orchestrator:workflow-start <work description>`
-- Named file: `/workflow-orchestrator:workflow-start --file docs/<name>-WORKFLOW.md <work description>`
+- Named file: `/workflow-orchestrator:workflow-start --file docs/<slug>-WORKFLOW.md <work description>`
 
 Remind the user that selecting a non-default workflow is done by passing that exact `--file`
 path — there is no picker.

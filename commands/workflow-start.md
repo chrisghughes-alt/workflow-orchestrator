@@ -42,14 +42,14 @@ run; the rest is the work description.
 
 **Parse `$ARGUMENTS` before Step 0:**
 
-- If `$ARGUMENTS` begins with `--file` followed by a whitespace-delimited path token, bind that path as
-  `WORKFLOW_FILE` and bind the remaining text as `WORK` (the work description).
+- If `$ARGUMENTS` begins with `--file` followed by a path token — a single whitespace-delimited token, or a
+  quoted string if the path contains spaces (strip the quotes) — bind that path as `WORKFLOW_FILE` and bind the
+  remaining text as `WORK` (the work description).
 - Otherwise, `WORKFLOW_FILE = docs/WORKFLOW.md` and `WORK = $ARGUMENTS` in full.
 
 The `--file` flag is recognized **only** in leading position, so a work description that merely contains the
-substring `--file` is treated as plain text. A path containing spaces must be quoted (e.g.
-``--file "my docs/pipeline.md"``) and the surrounding quotes stripped; otherwise the path token ends at the
-first whitespace.
+substring `--file` is treated as plain text (e.g. ``--file "my docs/pipeline.md"`` shows the quoting for a
+path that contains spaces).
 
 `WORK` is the work description (feature, bug, or change to start the pipeline on). If `WORK` is empty, ask the
 user to describe the work before Step 0, then treat their answer as `WORK`. Throughout the rest of this command, **`WORK` is the value passed to
