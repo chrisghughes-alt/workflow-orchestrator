@@ -175,7 +175,8 @@ log; the list above is what you never log.)
 - If the user wants to stop at any phase boundary, acknowledge and preserve state. Work products created so far
   remain committed and available for resumption.
 - However the run ends (full completion or a stop), run the **Workflow-fit suggestion** step
-  below; it stays silent on an exploratory exit and otherwise applies its tiers.
+  below; it stays silent on exploratory, error, or freshly-scaffolded exits, gives a one-liner on
+  an early stop, and otherwise applies its completion tiers.
 
 ---
 
@@ -202,7 +203,9 @@ nothing about the completed run.
 4. **Early stop → gentle.** The user was genuinely running the pipeline (did not disclaim it per
    1) and chose to stop partway at a phase boundary, including abandoning during a
    conditional-gate pause. Early stop is evaluated before tiering and **always yields the plain
-   one-liner**, never the escalated prompt, regardless of what the log contains.
+   one-liner**, never the escalated prompt, regardless of what the log contains. Use the plain
+   one-liner format and engagement protocol below, naming any logged deviations the same way the
+   full-completion one-liner does.
 5. **Full completion → tiered.** The pipeline reached its natural end (`current` became null).
    Apply the tiers below.
 
@@ -239,8 +242,11 @@ available; this only sets the default recommendation.
   affected `Route` targets** (both routes that referenced a phase by number, which a renumber
   shifts, and any terminal route that should now chain into a new phase), and include the rewired
   routes in the diff shown for confirmation. On confirmation, commit to the **target project's**
-  repo (no Claude co-author; non-git project → write without committing and say so). This commit
-  is unrelated to this plugin's own versioning.
+  repo — stage only `WORKFLOW_FILE` (never `git add -A`, so unrelated working-tree changes are not
+  swept in); if the tree carries unrelated uncommitted changes that prevent a clean single-file
+  commit, write the file without committing and tell the user. No Claude co-author; a non-git
+  project → write without committing and say so. This commit is unrelated to this plugin's own
+  versioning.
 - **Use `/workflow-capture`.** Point the user to run `/workflow-capture`; since `WORKFLOW_FILE`
   already exists, capture's Stage 4 will offer to update/augment it interactively (there is no
   `--augment` flag — it is a choice inside the command). Capture works from the **session
