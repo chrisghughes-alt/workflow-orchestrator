@@ -1,19 +1,23 @@
 # workflow-orchestrator
 
 A generic, **project-agnostic pipeline orchestrator** for Claude Code, packaged as an installable
-plugin. It adds one command — `/workflow-start` — that reads your project's `docs/WORKFLOW.md` and
-drives its phases in order under a fixed set of binding rules: phases run in sequence, every declared
-output is produced before advancing, consent gates block on explicit approval, and the engine keeps
-control even when an invoked sub-skill tries to decide what happens next.
+plugin. It adds two commands:
+
+- **`/workflow-start`** reads your project's `docs/WORKFLOW.md` and drives its phases in order under a
+  fixed set of binding rules: phases run in sequence, every declared output is produced before
+  advancing, consent gates block on explicit approval, and the engine keeps control even when an invoked
+  sub-skill tries to decide what happens next.
+- **`/workflow-capture`** builds that `docs/WORKFLOW.md` *for* you — it reviews the Claude session you
+  just finished and walks you through authoring a runnable pipeline from it, phase by phase.
 
 The engine knows nothing about any specific project. Your `docs/WORKFLOW.md` defines the phases, the
 skills they invoke, the artifacts they output, and the gates they enforce. The plugin supplies only the
 *discipline* that runs that pipeline faithfully.
 
-**No workflow yet? It bootstraps one.** The first time you run `/workflow-start` in a project that has
-no `docs/WORKFLOW.md`, the engine stops, tells you no pipeline is defined, and offers to scaffold a
-starter `docs/WORKFLOW.md` for you to customize — so you don't have to write one from a blank page. (It
-never invents a pipeline silently or borrows another project's phases.)
+**No workflow yet?** Two ways to get one without writing from a blank page: run `/workflow-capture` to
+distill one from a session you just did, or run `/workflow-start` in a project with no `docs/WORKFLOW.md`
+and let the engine scaffold a starter for you to customize. (Neither ever invents a pipeline silently or
+borrows another project's phases.)
 
 ## Why "orchestrator"
 
@@ -33,7 +37,9 @@ example workflows show it best: independent skills and agents composed into a si
 
 ## Quickstart
 
-1. Add a pipeline definition to your project at `docs/WORKFLOW.md`. Two easy starts:
+1. Add a pipeline definition to your project at `docs/WORKFLOW.md`. Three easy starts:
+   - **Capture a session:** just finished work you'd want to repeat? Run `/workflow-capture` and it
+     interactively turns the session into a `docs/WORKFLOW.md`.
    - **Let the engine bootstrap it:** just run `/workflow-start`. With no `docs/WORKFLOW.md` present, it
      offers to scaffold a starter you then customize.
    - **Copy an example:** start from [`examples/minimal-WORKFLOW.md`](examples/minimal-WORKFLOW.md) and
@@ -51,25 +57,39 @@ See [`docs/authoring-workflows.md`](docs/authoring-workflows.md) for the directi
 semantics, and routing. See [`examples/`](examples/) for a minimal starter plus two real (sanitized)
 pipelines — a compact 5-phase one and an elaborate 13-phase one.
 
-## Great ways to create a workflow
+## Creating a workflow with `/workflow-capture`
 
-You rarely have to write `docs/WORKFLOW.md` from scratch — the best pipelines are usually distilled
-from work your project already does:
+You rarely have to write `docs/WORKFLOW.md` from scratch — the best pipelines are distilled from work
+your project already does, and `/workflow-capture` does exactly that. Run it at the end of a session and
+it:
 
-- **Mine your existing project context.** Before (or while) scaffolding, ask Claude to review your
-  project memories (`CLAUDE.md`, memory files) and your `docs/` folder — existing specs, plans, and
-  design docs — and turn the process you already follow into a `docs/WORKFLOW.md`. You get a pipeline
-  grounded in your real conventions instead of a generic template.
-- **Capture a workflow that just went well.** Finished a run you'd want to repeat — even an ad-hoc one
-  you drove by hand, without `/workflow-start`? Ask Claude to write it up as a `docs/WORKFLOW.md` in
-  this orchestrator's format (phases, each with an **Orchestrator directives** subsection). Next time,
-  `/workflow-start` can replay it with the binding rules and consent gates enforced.
+- **Reviews the session you just ran** and proposes a candidate pipeline — the distinct phases, what
+  each invoked, what it output, and where approvals happened.
+- **Pulls in your project context (optional)** — your `CLAUDE.md`, `docs/`, and Claude memories — so the
+  pipeline reflects your real conventions and gates, not a generic template.
+- **Walks you through each phase interactively**, letting you confirm or edit its directives
+  (`Invoke` / `Output` / `Gate` / `Route`) one at a time before anything is written.
+- **Writes a runnable `docs/WORKFLOW.md`** in this orchestrator's exact format, ready for
+  `/workflow-start` to replay with binding rules and consent gates enforced.
+
+It captures even ad-hoc runs you drove by hand without `/workflow-start` — so a good run becomes a
+repeatable one.
+
+### Multiple workflows per project
+
+A project can hold more than one pipeline. The default file is `docs/WORKFLOW.md`; name extras
+`docs/<slug>-WORKFLOW.md` (e.g. `docs/release-WORKFLOW.md`) and run a specific one with a leading
+`--file` argument:
+
+```text
+/workflow-start --file docs/release-WORKFLOW.md cut the 2.0 release
+```
 
 ## What's in the box
 
 ```text
 .claude-plugin/   plugin + marketplace manifests
-commands/         the /workflow-start engine
+commands/         the /workflow-start engine + /workflow-capture authoring command
 docs/             authoring guide
 examples/         minimal + two real, sanitized WORKFLOW.md pipelines
 ```
