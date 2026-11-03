@@ -229,8 +229,8 @@ test('an agent whose step read a context window shows how full it is', async ($,
 const RUN = 'C:\\runs\\r1'
 const NUDGE_55 =
   `[HR] Context used 55%. Write the orchestrator handoff to ${RUN}\\handoffs\\orchestrator-handoff-YYYYMMDD-HHMM.md ` +
-  '(use the clock for the stamp), bring the Run tracker section of the run\'s plan document up to date and commit it ' +
-  `on main as a docs-only commit, update ${RUN}\\orchestrator-state.md, then end your turn.`
+  `(use the clock for the stamp), update ${RUN}\\orchestrator-state.md, do whatever your workflow document requires ` +
+  'at a handoff, then end your turn.'
 
 // A workflow document whose path holds a space, as a Windows path often does.
 const DOC = 'C:\\Docs\\My Workflow.md'

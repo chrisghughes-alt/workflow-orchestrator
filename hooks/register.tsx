@@ -55,8 +55,8 @@ function modeOf(state: Hr): HrMode {
 function nudgeText(percent: number, runFolder: string): string {
   return (
     `[HR] Context used ${Math.round(percent)}%. Write the orchestrator handoff to ${runFolder}\\handoffs\\orchestrator-handoff-YYYYMMDD-HHMM.md ` +
-    "(use the clock for the stamp), bring the Run tracker section of the run's plan document up to date and commit it " +
-    `on main as a docs-only commit, update ${runFolder}\\orchestrator-state.md, then end your turn.`
+    `(use the clock for the stamp), update ${runFolder}\\orchestrator-state.md, do whatever your workflow document ` +
+    'requires at a handoff, then end your turn.'
   )
 }
 
