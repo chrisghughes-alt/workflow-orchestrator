@@ -4,7 +4,7 @@ import { finishClear, seeHandoff } from '../hooks/register'
 import type { Hr } from '../types'
 
 const PANE = {
-  plugin: 'agent-sidebar',
+  plugin: 'workflow-orchestrator',
   component: 'Pane',
   requestId: 'agent-sidebar',
   props: {
@@ -159,7 +159,7 @@ test('the model can read the sidebar as JSON through the agents tool', async ($,
   const registered: { name: string; description: string; inputSchema?: unknown }[] = []
   on('tool.register', (_, e) => {
     registered.push(e)
-    return { value: { tool: `mcp__agent-sidebar__${e.name}` } }
+    return { value: { tool: `mcp__workflow-orchestrator__${e.name}` } }
   })
   on('agent.spawn', () => ({ model: 'claude-sonnet-5-5', agentId: 'a1' }))
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
@@ -170,7 +170,7 @@ test('the model can read the sidebar as JSON through the agents tool', async ($,
   await $.agent.spawn({ prompt: 'look around', description: 'Survey the repo' })
   await clock.advance(1500)
 
-  const r = await $.tool.call({ tool: 'mcp__agent-sidebar__agents' } as never)
+  const r = await $.tool.call({ tool: 'mcp__workflow-orchestrator__agents' } as never)
   const rows = JSON.parse(r.result as string) as Record<string, unknown>[]
   expect(rows.length).toBe(1)
   expect(rows[0]).toEqual(
@@ -222,7 +222,7 @@ test('an agent whose step read a context window shows how full it is', async ($,
   // 11,500 of a 200,000 window.
   expect((await ui.find({ type: 'Text', text: /↑/ }))?.text).toContain('ctx 12k (6%)')
   await ui.unmount()
-  const r = await $.tool.call({ tool: 'mcp__agent-sidebar__agents' } as never)
+  const r = await $.tool.call({ tool: 'mcp__workflow-orchestrator__agents' } as never)
   expect((JSON.parse(r.result as string) as { window: unknown }[])[0]!.window).toBe(200_000)
 })
 
@@ -253,7 +253,7 @@ function hrEngine(on: Parameters<Parameters<typeof test>[1]>[1]) {
   on('command.register', (_, e) => ({ value: { command: e.name } }))
   on('tool.register', (_, e) => {
     world.tools.push(e)
-    return { value: { tool: `mcp__agent-sidebar__${e.name}` } }
+    return { value: { tool: `mcp__workflow-orchestrator__${e.name}` } }
   })
   on('ui.open', () => ({ value: { isPlaced: true } }))
   on('ui.toast', (_, e) => {
@@ -331,24 +331,24 @@ test('the model arms and disarms the watch through the hr_watch and hr_off tools
   expect(byName.hr_off!.inputSchema).toEqual({ type: 'object', properties: {} })
 
   // A missing folder is refused with the command's own words.
-  const refused = await $.tool.call({ tool: 'mcp__agent-sidebar__hr_watch', runFolder: 'C:/runs/nope' } as never)
+  const refused = await $.tool.call({ tool: 'mcp__workflow-orchestrator__hr_watch', runFolder: 'C:/runs/nope' } as never)
   const typed = await $.command.run({ command: 'hr-watch', args: 'C:/runs/nope' })
   expect(refused.result).toBe(typed.text)
   await clock.advance(1500)
   expect(await header($)).not.toContain('HR')
 
-  const armed = await $.tool.call({ tool: 'mcp__agent-sidebar__hr_watch', runFolder: RUN, mode: 'nudge' } as never)
+  const armed = await $.tool.call({ tool: 'mcp__workflow-orchestrator__hr_watch', runFolder: RUN, mode: 'nudge' } as never)
   expect(armed.result).toBe(`HR armed on ${RUN}`)
   await clock.advance(1500)
   expect(await header($)).toContain('ctx used 10% · HR nudge · 0 running')
 
   // Auto: re-arms in auto mode.
-  const auto = await $.tool.call({ tool: 'mcp__agent-sidebar__hr_watch', runFolder: RUN, mode: 'auto' } as never)
+  const auto = await $.tool.call({ tool: 'mcp__workflow-orchestrator__hr_watch', runFolder: RUN, mode: 'auto' } as never)
   expect(auto.result).toBe(`HR armed on ${RUN} (auto)`)
   await clock.advance(1500)
   expect(await header($)).toContain('ctx used 10% · HR auto · 0 running')
 
-  const off = await $.tool.call({ tool: 'mcp__agent-sidebar__hr_off' } as never)
+  const off = await $.tool.call({ tool: 'mcp__workflow-orchestrator__hr_off' } as never)
   expect(off.result).toBe('HR off')
   await clock.advance(1500)
   expect(await header($)).not.toContain('HR')
@@ -362,7 +362,7 @@ test('hr_watch takes a threshold: at 5 a 6% reading nudges, and a bad one is ref
   world.percent = 2
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
 
-  const armed = await $.tool.call({ tool: 'mcp__agent-sidebar__hr_watch', runFolder: RUN, threshold: 5 } as never)
+  const armed = await $.tool.call({ tool: 'mcp__workflow-orchestrator__hr_watch', runFolder: RUN, threshold: 5 } as never)
   expect(armed.result).toBe(`HR armed on ${RUN} (5%)`)
   await clock.advance(1500)
   expect(await header($)).toContain('ctx used 2% · HR nudge · 0 running')
@@ -370,7 +370,7 @@ test('hr_watch takes a threshold: at 5 a 6% reading nudges, and a bad one is ref
 
   // Refused, and the watch keeps threshold 5.
   for (const threshold of [101, 0, 5.5, '7']) {
-    const r = await $.tool.call({ tool: 'mcp__agent-sidebar__hr_watch', runFolder: RUN, threshold } as never)
+    const r = await $.tool.call({ tool: 'mcp__workflow-orchestrator__hr_watch', runFolder: RUN, threshold } as never)
     expect(r.result).toBe(THRESHOLD_REFUSED)
   }
   await clock.advance(1500)
@@ -383,8 +383,8 @@ test('hr_watch takes a threshold: at 5 a 6% reading nudges, and a bad one is ref
   expect(world.submits[0]).toContain('[HR] Context used 6%.')
 
   // The default threshold, given or not, adds nothing to the reply.
-  await $.tool.call({ tool: 'mcp__agent-sidebar__hr_off' } as never)
-  const plain = await $.tool.call({ tool: 'mcp__agent-sidebar__hr_watch', runFolder: RUN, mode: 'auto', threshold: 50 } as never)
+  await $.tool.call({ tool: 'mcp__workflow-orchestrator__hr_off' } as never)
+  const plain = await $.tool.call({ tool: 'mcp__workflow-orchestrator__hr_watch', runFolder: RUN, mode: 'auto', threshold: 50 } as never)
   expect(plain.result).toBe(`HR armed on ${RUN} (auto)`)
 })
 
@@ -520,7 +520,7 @@ test('in auto mode with /clear enabled, a seen handoff clears and then hands the
     'clear',
     `[HR] Successor start. Read ${RUN}\\handoffs\\newer.md, ${RUN}\\orchestrator-state.md and ` +
       'C:\\Code-Repos\\Equipment Check\\docs\\Native-Agent-Workflow.md in full, check CronList and re-create the ' +
-      '30-minute heartbeat cron only if it is gone, call the mcp__agent-sidebar__hr_watch tool with runFolder ' +
+      '30-minute heartbeat cron only if it is gone, call the mcp__workflow-orchestrator__hr_watch tool with runFolder ' +
       `${RUN} and mode auto, then continue from the handoff's next three actions.`,
   ])
 
@@ -573,7 +573,7 @@ test('in auto mode the watch clears, resumes and re-arms, though the clear wipes
   const { clock, world } = hrEngine(on)
   // A live /clear leaves the plugin's stored values at their defaults.
   world.onCommand = command => {
-    if (command === 'clear') store.forget('agent-sidebar')
+    if (command === 'clear') store.forget('workflow-orchestrator')
   }
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
 
@@ -614,7 +614,7 @@ test('/hr-off during a clear keeps the watch off afterwards', async ($, on) => {
   const { clock, world } = hrEngine(on)
   world.onCommand = async command => {
     if (command !== 'clear') return
-    store.forget('agent-sidebar')
+    store.forget('workflow-orchestrator')
     // The owner turns the watch off while the clear is in flight.
     await $.command.run({ command: 'hr-off', args: '' })
   }
@@ -640,7 +640,7 @@ test('a second session start, as /clear may raise, leaves one poll running, not 
   })
   on('session.usage', () => usage(10))
   on('command.register', (_, e) => ({ value: { command: e.name } }))
-  on('tool.register', (_, e) => ({ value: { tool: `mcp__agent-sidebar__${e.name}` } }))
+  on('tool.register', (_, e) => ({ value: { tool: `mcp__workflow-orchestrator__${e.name}` } }))
   on('ui.open', () => ({ value: { isPlaced: true } }))
   on('session.start', (_, e) => ({ cwd: e.cwd }))
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })

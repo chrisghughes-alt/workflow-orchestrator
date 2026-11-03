@@ -32,7 +32,7 @@ Mode (747a613):
 - `/hr-off` resets to `{ runFolder: '', phase: 'off', mode: 'nudge', threshold }`.
 - `seeHandoff` goes to `clearing` only when mode is auto AND clearEnabled; every other case goes to `ready`. The old "handoff seen; /clear disabled" re-arm path is gone.
 Tools (b1998c2):
-- `hr_watch` and `hr_off` are registered beside `agents` with the exact schemas given. Their hooks on `mcp__agent-sidebar__hr_watch` / `__hr_off` call the same `armWatch($, runFolder, mode)` / `disarmWatch($)` the commands call, and return the reply as `{ result: <text> }`. Validate reports `$.fs.exists (via armWatch)`.
+- `hr_watch` and `hr_off` are registered beside `agents` with the exact schemas given. Their hooks on `mcp__workflow-orchestrator__hr_watch` / `__hr_off` call the same `armWatch($, runFolder, mode)` / `disarmWatch($)` the commands call, and return the reply as `{ result: <text> }`. Validate reports `$.fs.exists (via armWatch)`.
 - Test: the tool arms (header `HR nudge`), refuses a missing folder with the command's own text (compared directly), returns the auto-not-enabled text, and `hr_off` disarms.
 Notes:
 - plugin.json is still 0.2.0, and its description does not mention the hr_watch/hr_off tools. The brief's version bump was in 3f; I did not bump again.
@@ -60,7 +60,7 @@ Test hooks for `$` operations answer `{ value: ... }`; test hooks for events ans
 - fs.list: `$.fs.list(path)` -> FsEntry[] `{ name, kind: 'file'|'dir'|'other', size, mtimeMs, isLink }`; test hook `on('fs.list', (_, e) => ({ value: [...] }))`, `e.path`.
 - fs.exists: `$.fs.exists(path)` -> boolean; test hook returns `{ value: boolean }`.
 - tool.register: `$.tool.register({ name, description, inputSchema?, isDeferred? })` (ToolSpec) -> `{ tool: 'mcp__<plugin>__<name>' }`; test hook gets RegisteredToolSpec, returns `{ value: { tool } }`. "Rejects until the session binds, at session.start."
-- tool.call: serve with `on('tool.call', { tool: 'mcp__agent-sidebar__agents' }, ...)` returning `{ result }` (ToolCallResult; `{ deny }` refuses). The tool returns `{ result: JSON.stringify(rows) }`.
+- tool.call: serve with `on('tool.call', { tool: 'mcp__workflow-orchestrator__agents' }, ...)` returning `{ result }` (ToolCallResult; `{ deny }` refuses). The tool returns `{ result: JSON.stringify(rows) }`.
 - ui.toast: plugin calls `$.ui.toast(text)`; the test hook receives `e` as `{ text }` and returns `{ value: undefined }`.
 - turn.complete (test call): `$.turn.complete({ answer, durationMs, isAborted, turnId, reason, agentId? })`; test hook returns `{ text }`.
 
@@ -76,16 +76,16 @@ Test hooks for `$` operations answer `{ value: ... }`; test hooks for events ans
 
 ## 3e findings
 - The contract gives no per-agent scoping for `$.session.usage()`. `SessionUsageArgs` has only `breakdown` and `columns`, with no `agentId`. `SessionContextUsage.window` is documented as "The context window of the session's model". The one hit for "a subagent's own" (~2865) is about `$.session.cwd()` (keep the value read inside the hook). No hits for "agent-scoped".
-- Implemented anyway: in an agent's turn.step, after the response, `$.session.usage().context.window` is stored on the row as `window` (AgentRow shape tag bumped to `agents-2`). The stats line shows `ctx 12k (6%)` when a window is known, `ctx 12k` otherwise. The main loop's window is in the `gauge` atom (it is not exposed in the tool). Expect every agent to show the main session's window unless the engine scopes the call. I have NOT verified it per agent. The live check is to call mcp__agent-sidebar__agents with a Sonnet and an Opus agent running and compare their `window` values.
+- Implemented anyway: in an agent's turn.step, after the response, `$.session.usage().context.window` is stored on the row as `window` (AgentRow shape tag bumped to `agents-2`). The stats line shows `ctx 12k (6%)` when a window is known, `ctx 12k` otherwise. The main loop's window is in the `gauge` atom (it is not exposed in the tool). Expect every agent to show the main session's window unless the engine scopes the call. I have NOT verified it per agent. The live check is to call mcp__workflow-orchestrator__agents with a Sonnet and an Opus agent running and compare their `window` values.
 
 ## Not done / open
 - The /clear survival path is untested live (CLEAR_ENABLED = false, by design).
 - The poll's `clearing` branch is exercised by no test. Test 6 proves `finishClear`'s logic with injected fakes, but nothing drives phase `clearing` through the engine. The live wiring `clear: () => $.command.run({ command: 'clear' })` and the `isClearing` overlap guard are untested. The orchestrator's live survival test is the only check.
-- History note: the change that makes the roster hook's matcher a plain string (`'mcp__agent-sidebar__agents'`, so validate can read it) landed in the 3d commit, not 3c.
+- History note: the change that makes the roster hook's matcher a plain string (`'mcp__workflow-orchestrator__agents'`, so validate can read it) landed in the 3d commit, not 3c.
 - Paths: `runFolder` is stored as typed. `/hr-watch C:/runs/r1` works for fs checks (the engine normalizes), but the nudge text then reads `C:/runs/r1\handoffs\...` (mixed separators, which Windows tolerates). An argument wrapped in quotes, e.g. `/hr-watch "C:\Code-Repos\Equipment Check\runs\r1"`, fails `fs.exists` because the quotes are kept. Pass the path unquoted; spaces are fine because the whole trimmed argument is the path.
 - Unknown whether `/hr-watch`, as the successor prompt asks, can be run by the model itself. Slash commands are typed by the person, and nothing here gives the model a way to run one. The orchestrator should check this before enabling clear.
 - Unknown whether /clear re-fires session.start. If it does, a second 1-second poll would start in the same process, and the in-closure guard against overlapping clears would not be shared between the two polls.
-- Hot reload: this folder reloaded into live sessions on each save. A running session already shows the `agent-sidebar` MCP tool server.
+- Hot reload: this folder reloaded into live sessions on each save. A running session already shows the `workflow-orchestrator` MCP tool server.
 
 ## Addendum, 2026-11-03 afternoon (v0.3.0)
 

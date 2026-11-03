@@ -58,7 +58,7 @@ export type Hr = {
 
 declare module 'claude-code' {
   interface PluginState {
-    'agent-sidebar': {
+    'workflow-orchestrator': {
       agents: Shaped<Record<string, AgentRow>>
       now: number
       gauge: Gauge

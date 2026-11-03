@@ -5,7 +5,7 @@ import type { AgentRow, Gauge, Hr, HrMode } from '../types'
 
 const PANE = 'agent-sidebar'
 const COMMAND = 'agent-sidebar'
-// The model calls it as mcp__agent-sidebar__agents.
+// The model calls it as mcp__workflow-orchestrator__agents.
 const ROSTER_TOOL = 'agents'
 const MAX_ROWS = 40
 const POLL_MS = 1000
@@ -29,14 +29,14 @@ const WORKFLOW_DOC = 'C:\\Code-Repos\\Equipment Check\\docs\\Native-Agent-Workfl
 
 // Change the tag when AgentRow's fields change: a reload keeps what the old
 // code stored, and the tag makes the new code start fresh instead of misreading it.
-const agents = atom({ plugin: 'agent-sidebar', key: 'agents' } as const, {}, {
+const agents = atom({ plugin: 'workflow-orchestrator', key: 'agents' } as const, {}, {
   shape: 'agents-2',
 })
 // The clock the pane draws elapsed times from; ticks only while an agent runs.
-const now = atom({ plugin: 'agent-sidebar', key: 'now' } as const, 0)
+const now = atom({ plugin: 'workflow-orchestrator', key: 'now' } as const, 0)
 // The main conversation's context window. `percent` is the share USED, not left.
-const gauge = atom({ plugin: 'agent-sidebar', key: 'gauge' } as const, { window: 0 } as Gauge)
-const hr = atom({ plugin: 'agent-sidebar', key: 'hr' } as const, {
+const gauge = atom({ plugin: 'workflow-orchestrator', key: 'gauge' } as const, { window: 0 } as Gauge)
+const hr = atom({ plugin: 'workflow-orchestrator', key: 'hr' } as const, {
   runFolder: '',
   phase: 'off',
   mode: 'nudge',
@@ -62,7 +62,7 @@ function resumeText(handoffPath: string, runFolder: string, mode: HrMode): strin
   return (
     `[HR] Successor start. Read ${handoffPath}, ${runFolder}\\orchestrator-state.md and ${WORKFLOW_DOC} in full, ` +
     'check CronList and re-create the 30-minute heartbeat cron only if it is gone, call the ' +
-    `mcp__agent-sidebar__hr_watch tool with runFolder ${runFolder} and mode ${mode}, ` +
+    `mcp__workflow-orchestrator__hr_watch tool with runFolder ${runFolder} and mode ${mode}, ` +
     "then continue from the handoff's next three actions."
   )
 }
@@ -524,7 +524,7 @@ export const register: Register = on => {
 
   // The same two functions as the commands above, for the model: the reply
   // text comes back as the tool's result.
-  on('tool.call', { tool: 'mcp__agent-sidebar__hr_watch' }, async ($, e) => {
+  on('tool.call', { tool: 'mcp__workflow-orchestrator__hr_watch' }, async ($, e) => {
     const input = e as unknown as { runFolder?: unknown; mode?: unknown; threshold?: unknown }
     const runFolder = typeof input.runFolder === 'string' ? input.runFolder : ''
     const mode = typeof input.mode === 'string' ? input.mode : undefined
@@ -532,7 +532,7 @@ export const register: Register = on => {
     return { result: await armWatch($, runFolder, mode, input.threshold) }
   }).catch(() => ({ deny: 'HR: the watch could not be armed.' }))
 
-  on('tool.call', { tool: 'mcp__agent-sidebar__hr_off' }, async $ => ({
+  on('tool.call', { tool: 'mcp__workflow-orchestrator__hr_off' }, async $ => ({
     result: await disarmWatch($),
   })).catch(() => ({ deny: 'HR: the watch could not be turned off.' }))
 
@@ -596,7 +596,7 @@ export const register: Register = on => {
   })
 
   // The roster tool: the sidebar's rows, in the pane's order, as JSON.
-  on('tool.call', { tool: 'mcp__agent-sidebar__agents' }, async $ => {
+  on('tool.call', { tool: 'mcp__workflow-orchestrator__agents' }, async $ => {
     const map = await read($, agents)
     return { result: JSON.stringify(ordered(map).map(rosterRow)) }
   }).catch(() => ({ deny: 'The agents sidebar could not be read.' }))
