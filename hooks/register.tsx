@@ -56,7 +56,7 @@ function nudgeText(percent: number, runFolder: string): string {
   return (
     `[HR] Context used ${Math.round(percent)}%. Write the orchestrator handoff to ${runFolder}\\handoffs\\orchestrator-handoff-YYYYMMDD-HHMM.md ` +
     `(use the clock for the stamp), update ${runFolder}\\orchestrator-state.md, do whatever your workflow document ` +
-    'requires at a handoff, then end your turn.'
+    'requires at a handoff, then end your turn. The handoff ends with a section headed "Next three actions".'
   )
 }
 
@@ -139,6 +139,14 @@ let isOffDuringClear = false
 // Set once the poll has opened the Agents pane for the first background agent,
 // or the person opened it with the command, so later polls never open it again.
 let hasOpenedPane = false
+// Nudge mode's resume, waiting for the person's /clear: the watch as it stood
+// when it reached ready. Kept in module memory because a /clear wipes the
+// plugin's stored values but not this. Cleared when the resume is sent, and
+// by /hr-off or a fresh arm, so a person who turns the watch off gets none.
+let pendingResume: Hr | undefined
+// When the session began, as the poll last read it. A /clear starts the
+// session over, so a change here while a resume is pending is the person's clear.
+let lastStartedAt: number | undefined
 
 // Opens the Agents pane, without focus, the first time the roster has a row.
 // The engine's own list of open panes outlives a module reload, so a pane
@@ -171,25 +179,30 @@ function thresholdOf(word: string): number {
 // mode word (the threshold), or key=value with key mode, threshold or doc.
 // The folder may hold spaces, so reading stops at the first word that is none
 // of these, and the rest is the folder. A doc path may hold spaces only as the
-// last option: doc= takes the rest of the line. The first word is always part
-// of the folder. A key not known is returned in `unknown`.
+// last option: doc= takes the rest of the line. The first word is part of the
+// folder unless it is a mode word or key=value: then no folder was given, and
+// the watch uses its default one. A key not known is returned in `unknown`.
 function watchArgs(args: string): WatchArgs {
   const text = args.trim()
   // Each word with where it starts, so the folder is cut from the text as typed.
   const words = [...text.matchAll(/\S+/g)].map(m => ({ word: m[0], at: m.index }))
   const out: WatchArgs = { runFolder: '' }
+  const isModeWord = (word: string) => /^(nudge|auto)$/i.test(word)
+  const isOption = (word: string) => /^[^=]+=/.test(word)
+  // The index of the first word that may be an option. A mode word is never an
+  // absolute path, so it cannot be the start of a folder.
+  const first = words.length > 0 && (isModeWord(words[0]!.word) || isOption(words[0]!.word)) ? 0 : 1
   // The last option may be a doc whose path holds spaces: everything from the
   // last doc= word to the end of the line.
   const lastWord = words[words.length - 1]?.word ?? ''
-  if (!/^[^=]+=/.test(lastWord)) {
-    const at = words.findLastIndex((w, i) => i > 0 && /^doc=/i.test(w.word))
-    if (at > 0) {
+  if (!isOption(lastWord)) {
+    const at = words.findLastIndex((w, i) => i >= first && /^doc=/i.test(w.word))
+    if (at >= first) {
       out.workflowDoc = text.slice(words[at]!.at + 'doc='.length)
       words.splice(at)
     }
   }
-  const isModeWord = (word: string) => /^(nudge|auto)$/i.test(word)
-  while (words.length > 1) {
+  while (words.length > first) {
     const word = words[words.length - 1]!.word
     const option = /^([^=]+)=(.*)$/.exec(word)
     if (option) {
@@ -201,7 +214,7 @@ function watchArgs(args: string): WatchArgs {
       else return { runFolder: '', unknown: option[1]! }
     } else if (isModeWord(word)) {
       out.mode ??= word.toLowerCase()
-    } else if (words.length > 2 && isModeWord(words[words.length - 2]!.word) && out.threshold === undefined) {
+    } else if (words.length > first + 1 && isModeWord(words[words.length - 2]!.word) && out.threshold === undefined) {
       // The bare threshold form: the word right after the mode word.
       out.threshold = thresholdOf(word)
     } else {
@@ -242,9 +255,24 @@ function armedText(path: string, state: Hr): string {
   return `HR armed on ${path} (${parts.join(', ')})`
 }
 
+// The run folder the watch uses when given none: .runs/hr under the session's
+// project root. The engine offers no way to make a bare folder, but a file
+// write makes the folders above the file, so a placeholder file creates the
+// handoffs folder. It is written only when that folder is missing, and its
+// name does not end in .md, so it is never taken for a handoff.
+async function defaultRunFolder($: Dollar): Promise<string> {
+  const folder = within(within(await $.session.root(), '.runs'), 'hr')
+  const handoffs = within(folder, 'handoffs')
+  if (!(await $.fs.exists(handoffs).catch(() => false))) {
+    await $.fs.write(within(handoffs, '.keep'), 'The context watch looks here for hand-off files.\n')
+  }
+  return folder
+}
+
 // Arms the context watch on a run folder that exists, in nudge mode unless
 // auto is asked for and /clear is enabled, at the given threshold or the
-// default, with the workflow document if one is given. Both paths must be
+// default, with the workflow document if one is given. With no run folder
+// given it arms on the default one, creating it if need be. Both paths must be
 // absolute and free of control characters, and both must exist; a refusal
 // leaves the watch as it was. Arming it again on the
 // same folder, mode, threshold and document (or none given) leaves it where it
@@ -257,9 +285,6 @@ async function armWatch(
   threshold?: unknown,
   workflowDoc?: unknown,
 ): Promise<string> {
-  const path = runFolder.trim()
-  if (path === '')
-    return 'HR: give the run folder: /hr-watch <absolute path> [nudge|auto] [threshold] [mode=, threshold=, doc=]. The watch stays off.'
   if (mode !== undefined && mode !== 'nudge' && mode !== 'auto')
     return `HR: unknown mode ${mode}; use nudge or auto. The watch is unchanged.`
   if (threshold !== undefined && !isThreshold(threshold)) return 'HR: threshold must be a whole number from 1 to 100'
@@ -267,9 +292,18 @@ async function armWatch(
   // An empty doc reads as none given.
   const doc = typeof workflowDoc === 'string' && workflowDoc.trim() !== '' ? workflowDoc.trim() : undefined
   // Both paths go into the nudge and resume prompts, so both are checked
-  // before anything is stored.
-  if (!isSafePath(path)) return unsafePathText('runFolder')
+  // before anything is stored. The doc is checked before the default folder is
+  // made, so a refused call leaves nothing new on disk.
   if (doc !== undefined && !isSafePath(doc)) return unsafePathText('workflowDoc')
+  let path = runFolder.trim()
+  if (path === '') {
+    try {
+      path = await defaultRunFolder($)
+    } catch (error) {
+      return `HR: the default run folder could not be made: ${error instanceof Error ? error.message : String(error)}. The watch is unchanged.`
+    }
+  }
+  if (!isSafePath(path)) return unsafePathText('runFolder')
   const exists = await $.fs.exists(path).catch(() => false)
   if (!exists) return `HR: no folder at ${path}. The watch stays off.`
   if (doc !== undefined && !(await $.fs.exists(doc).catch(() => false))) return `HR: no file at ${doc}`
@@ -295,6 +329,8 @@ async function armWatch(
     }
     return stored
   })
+  // Arming again from ready means the person chose to go on without a clear.
+  pendingResume = undefined
   if (mode === 'auto' && !CLEAR_ENABLED) return AUTO_DISABLED_TEXT
   return armedText(path, stored ?? { runFolder: path, phase: 'armed', mode: wanted, threshold: HR_THRESHOLD })
 }
@@ -302,6 +338,7 @@ async function armWatch(
 // Turns the watch off and forgets its run.
 async function disarmWatch($: Dollar): Promise<string> {
   if (isClearing) isOffDuringClear = true
+  pendingResume = undefined
   await update($, hr, (cur: Hr) => ({
     runFolder: '',
     phase: 'off',
@@ -471,11 +508,12 @@ export const register: Register = on => {
     await $.command
       .register({
         name: HR_WATCH,
-        description: 'Arm the context watch: nudge a handoff at the threshold, then clear and resume',
-        argumentHint: '<run-folder> [nudge|auto] [threshold] [mode=…] [threshold=…] [doc=<workflow doc path>]',
+        description:
+          "Watch the main session's context use once a second; at the threshold, ask for a hand-off file. No arguments needed",
+        argumentHint: '[folder] [nudge|auto] [key=value …]',
       })
       .catch(() => undefined)
-    await $.command.register({ name: HR_OFF, description: 'Disarm the context watch' }).catch(() => undefined)
+    await $.command.register({ name: HR_OFF, description: 'Turn the context watch off' }).catch(() => undefined)
     // The pane is not opened here: the poll opens it when the first background
     // agent appears, and /agent-sidebar opens it any time.
     // A failed registration costs the model the tool, never the sidebar its poll.
@@ -492,23 +530,38 @@ export const register: Register = on => {
       .register({
         name: 'hr_watch',
         description:
-          'Arm the context watch for this session: nudge for a handoff at the threshold (percent of context used, 1 to 100, default 50), then (mode auto) clear and resume, or (mode nudge, the default) wait for the owner. Pass the absolute run folder, and optionally workflowDoc, the absolute path of the workflow document the successor reads on resume; without it the resume prompt points at the run-state file\'s "how to resume" section.',
+          "Turn on the context watch. It reads the main session's context gauge once a second. When the share used reaches the threshold, it asks you, once, to write a hand-off file. In nudge mode (the default) it then waits for the person to run /clear; in auto mode it clears and sends the resume prompt by itself. Every argument is optional; paths must be absolute.",
         inputSchema: {
           type: 'object',
           properties: {
-            runFolder: { type: 'string' },
-            mode: { type: 'string', enum: ['nudge', 'auto'] },
-            threshold: { type: 'integer', minimum: 1, maximum: 100 },
-            workflowDoc: { type: 'string' },
+            runFolder: {
+              type: 'string',
+              description:
+                'Where the hand-off lands (the plugin looks there only to see the hand-off file appear); default <repo>/.runs/hr',
+            },
+            mode: {
+              type: 'string',
+              enum: ['nudge', 'auto'],
+              description: 'nudge waits for you to /clear; auto clears and resumes by itself',
+            },
+            threshold: {
+              type: 'integer',
+              minimum: 1,
+              maximum: 100,
+              description: 'percent of context used, 1 to 100, default 50',
+            },
+            workflowDoc: {
+              type: 'string',
+              description: 'a document the new context should read after the hand-off; optional',
+            },
           },
-          required: ['runFolder'],
         },
       })
       .catch(() => undefined)
     await $.tool
       .register({
         name: 'hr_off',
-        description: 'Disarm the context watch.',
+        description: 'Turn the context watch off.',
         inputSchema: { type: 'object', properties: {} },
       })
       .catch(() => undefined)
@@ -546,6 +599,25 @@ export const register: Register = on => {
       })
     }
 
+    // Nudge mode, after the person's /clear: the same resume prompt auto mode
+    // sends, as the first prompt of the new context, and the watch re-armed
+    // with what it had before the clear. The pending value is taken before
+    // anything is awaited, so a second poll cannot send it again. The watch is
+    // written first and the prompt is not awaited, for the same reason the
+    // nudge is not: the submit runs a turn of its own once the session is idle.
+    const resumeAfterClear = async () => {
+      const state = pendingResume
+      pendingResume = undefined
+      if (state === undefined) return
+      const after: Hr = { ...state, phase: 'armed', waitsForDrop: true, nudgedAt: undefined }
+      // The clear wiped the store, so it reads as never armed. If the successor
+      // already armed it through hr_watch, keep what it set.
+      await update($, hr, (cur: Hr) => (isFresh(cur) || cur.phase === 'ready' ? after : cur))
+      void $.prompt.submit({ text: resumeText(state.handoffPath ?? '', state) }).catch((error: unknown) => {
+        $.ui.toast(`HR: the resume prompt failed: ${error instanceof Error ? error.message : String(error)}`)
+      })
+    }
+
     // Poll the engine's agent list: it is the only source of each agent's
     // status (running, idle, done). Write only on a change, so an idle
     // session does not redraw every second.
@@ -571,7 +643,11 @@ export const register: Register = on => {
       })()
       // Separate from the list refresh, so a failed usage read never stops it.
       void (async () => {
-        const { context } = await $.session.usage()
+        const { context, startedAt } = await $.session.usage()
+        // A new start time with a resume pending: the person ran /clear.
+        const isNewSession = lastStartedAt !== undefined && startedAt !== lastStartedAt
+        lastStartedAt = startedAt
+        if (isNewSession && pendingResume !== undefined) await resumeAfterClear()
         // `percent` is tokens over window: the share of the window USED, not left.
         const reading: Gauge = { percent: context.percent, window: context.window, tokens: context.tokens }
         const last = await read($, gauge)
@@ -767,7 +843,16 @@ export const register: Register = on => {
             { list: path => $.fs.list(path), toast: text => $.ui.toast(text) },
             CLEAR_ENABLED,
           )
-          if (seen !== state) await update($, hr, (cur: Hr) => (cur.phase === 'nudged' ? seen : cur))
+          let isStored = false
+          if (seen !== state) {
+            await update($, hr, (cur: Hr) => {
+              isStored = cur.phase === 'nudged'
+              return isStored ? seen : cur
+            })
+          }
+          // Nudge mode: keep the resume where a /clear cannot wipe it, for the
+          // poll to send once the person has cleared.
+          if (isStored && seen.phase === 'ready') pendingResume = seen
         }
       } catch {
         // The watch stays nudged; the next main turn's end looks again.

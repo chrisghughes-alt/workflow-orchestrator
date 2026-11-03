@@ -35,10 +35,12 @@ export type Gauge = {
   tokens?: number
 }
 
-// The context watch. `off` until /hr-watch arms it on a run folder; `armed`
+// The context watch. `off` until /hr-watch arms it on a run folder (the one
+// given, else .runs/hr under the session's project root); `armed`
 // waits for the gauge to reach the threshold; `nudged` has asked the main loop
 // for a handoff and waits for the file. Then, in nudge mode, `ready`: the
-// handoff exists and the owner runs /clear; in auto mode, `clearing` runs
+// handoff exists and the owner runs /clear, after which the plugin sends the
+// resume prompt and goes back to `armed`; in auto mode, `clearing` runs
 // /clear and the resume prompt, then back to `armed`.
 export type HrPhase = 'off' | 'armed' | 'nudged' | 'ready' | 'clearing'
 export type HrMode = 'nudge' | 'auto'

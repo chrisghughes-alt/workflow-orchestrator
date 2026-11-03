@@ -77,10 +77,11 @@ test('a value an earlier version stored is declined', async ($, on) => {
 })
 
 // Stands in for $.session.usage(): the main conversation's context window.
-function usage(percent: number | undefined) {
+// `startedAt` is when the session began; a /clear starts it over.
+function usage(percent: number | undefined, startedAt = 0) {
   return {
     value: {
-      startedAt: 0,
+      startedAt,
       context: { window: 200_000, percent, tokens: percent === undefined ? undefined : percent * 2000 },
       rateLimits: [],
     },
@@ -227,10 +228,14 @@ test('an agent whose step read a context window shows how full it is', async ($,
 })
 
 const RUN = 'C:\\runs\\r1'
+// The session's project root, and the run folder the watch uses when given none.
+const ROOT = 'C:\\repo'
+const DEFAULT_RUN = `${ROOT}\\.runs\\hr`
+const PLACEHOLDER = `${DEFAULT_RUN}\\handoffs\\.keep`
 const NUDGE_55 =
   `[HR] Context used 55%. Write the orchestrator handoff to ${RUN}\\handoffs\\orchestrator-handoff-YYYYMMDD-HHMM.md ` +
   `(use the clock for the stamp), update ${RUN}\\orchestrator-state.md, do whatever your workflow document requires ` +
-  'at a handoff, then end your turn.'
+  'at a handoff, then end your turn. The handoff ends with a section headed "Next three actions".'
 
 // A workflow document whose path holds a space, as a Windows path often does.
 const DOC = 'C:\\Docs\\My Workflow.md'
@@ -248,6 +253,8 @@ function hrEngine(on: Parameters<Parameters<typeof test>[1]>[1]) {
   const clock = mock.clock(on)
   const world = {
     percent: 10 as number | undefined,
+    // When the session began, as $.session.usage() reports it; a /clear moves it.
+    startedAt: 0,
     handoffs: [] as Fs[],
     submits: [] as string[],
     commands: [] as string[],
@@ -257,9 +264,20 @@ function hrEngine(on: Parameters<Parameters<typeof test>[1]>[1]) {
     onCommand: undefined as ((command: string) => unknown) | undefined,
     // The workflow documents that exist on disk.
     docs: [DOC, 'C:\\Docs\\flow.md'] as string[],
+    // Every file the plugin wrote, and the folders that writing created.
+    written: [] as string[],
+    dirs: [] as string[],
   }
+  on('session.root', () => ({ value: ROOT }))
+  on('fs.write', (_, e) => {
+    world.written.push(e.path)
+    // Like the engine, a write creates the folders above the file.
+    const parts = e.path.split('\\')
+    for (let i = 1; i < parts.length; i++) world.dirs.push(parts.slice(0, i).join('\\'))
+    return { value: undefined }
+  })
   on('agent.list', () => ({ value: [] }))
-  on('session.usage', () => usage(world.percent))
+  on('session.usage', () => usage(world.percent, world.startedAt))
   on('command.register', (_, e) => ({ value: { command: e.name } }))
   on('tool.register', (_, e) => {
     world.tools.push(e)
@@ -272,7 +290,7 @@ function hrEngine(on: Parameters<Parameters<typeof test>[1]>[1]) {
   })
   on('session.start', (_, e) => ({ cwd: e.cwd }))
   // The engine hands these hooks the path in Windows form, backslashes throughout.
-  on('fs.exists', (_, e) => ({ value: e.path === RUN || world.docs.includes(e.path) }))
+  on('fs.exists', (_, e) => ({ value: e.path === RUN || world.docs.includes(e.path) || world.dirs.includes(e.path) }))
   on('fs.list', (_, e) => ({ value: e.path === `${RUN}\\handoffs` ? world.handoffs : [] }))
   on('prompt.submit', (_, e) => {
     world.submits.push(e.text)
@@ -302,10 +320,60 @@ test('/hr-watch on a missing folder stays off', async ($, on) => {
 
   const r = await $.command.run({ command: 'hr-watch', args: 'C:/runs/nope' })
   expect(r.text).toContain('C:/runs/nope')
-  const none = await $.command.run({ command: 'hr-watch', args: '' })
-  expect(none.text).toBeDefined()
   await clock.advance(1500)
   expect(await header($)).not.toContain('HR')
+})
+
+test('hr_watch with no arguments arms the default folder and creates its handoffs folder', async ($, on) => {
+  const { clock, world } = hrEngine(on)
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+
+  const armed = await $.tool.call({ tool: 'mcp__workflow-orchestrator__hr_watch' } as never)
+  expect(armed.result).toBe(`HR armed on ${DEFAULT_RUN} (nudge, 50%)`)
+  expect(world.written).toEqual([PLACEHOLDER])
+  expect(world.dirs).toContain(`${DEFAULT_RUN}\\handoffs`)
+  await clock.advance(1500)
+  expect(await header($)).toContain('HR nudge ·')
+
+  // Arming again finds the folder there and writes nothing more.
+  expect((await $.tool.call({ tool: 'mcp__workflow-orchestrator__hr_watch' } as never)).result).toBe(
+    `HR armed on ${DEFAULT_RUN} (nudge, 50%)`,
+  )
+  expect(world.written).toEqual([PLACEHOLDER])
+})
+
+test('/hr-watch alone arms the default folder with the defaults', async ($, on) => {
+  const { clock, world } = hrEngine(on)
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+
+  expect((await $.command.run({ command: 'hr-watch', args: '' })).text).toBe(`HR armed on ${DEFAULT_RUN} (nudge, 50%)`)
+  expect(world.written).toEqual([PLACEHOLDER])
+  await clock.advance(1500)
+  expect(await header($)).toContain('HR nudge ·')
+})
+
+test('/hr-watch auto arms the default folder in auto mode', async ($, on) => {
+  const { clock } = hrEngine(on)
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+
+  expect((await $.command.run({ command: 'hr-watch', args: 'auto' })).text).toBe(`HR armed on ${DEFAULT_RUN} (auto, 50%)`)
+  await clock.advance(1500)
+  expect(await header($)).toContain('HR auto ·')
+  // The options that may follow a folder may follow the mode word as well.
+  await $.command.run({ command: 'hr-off', args: '' })
+  expect((await $.command.run({ command: 'hr-watch', args: 'auto 5' })).text).toBe(`HR armed on ${DEFAULT_RUN} (auto, 5%)`)
+})
+
+test('an explicit folder still arms there and creates nothing', async ($, on) => {
+  const { world } = hrEngine(on)
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+
+  expect((await $.command.run({ command: 'hr-watch', args: `${RUN} auto` })).text).toBe(`HR armed on ${RUN} (auto, 50%)`)
+  await $.command.run({ command: 'hr-off', args: '' })
+  expect((await $.tool.call({ tool: 'mcp__workflow-orchestrator__hr_watch', runFolder: RUN } as never)).result).toBe(
+    `HR armed on ${RUN} (nudge, 50%)`,
+  )
+  expect(world.written).toEqual([])
 })
 
 test('/hr-watch with a mode word: nudge arms in nudge, auto arms in auto', async ($, on) => {
@@ -332,13 +400,29 @@ test('the model arms and disarms the watch through the hr_watch and hr_off tools
   expect(byName.hr_watch!.inputSchema).toEqual({
     type: 'object',
     properties: {
-      runFolder: { type: 'string' },
-      mode: { type: 'string', enum: ['nudge', 'auto'] },
-      threshold: { type: 'integer', minimum: 1, maximum: 100 },
-      workflowDoc: { type: 'string' },
+      runFolder: {
+        type: 'string',
+        description:
+          'Where the hand-off lands (the plugin looks there only to see the hand-off file appear); default <repo>/.runs/hr',
+      },
+      mode: {
+        type: 'string',
+        enum: ['nudge', 'auto'],
+        description: 'nudge waits for you to /clear; auto clears and resumes by itself',
+      },
+      threshold: {
+        type: 'integer',
+        minimum: 1,
+        maximum: 100,
+        description: 'percent of context used, 1 to 100, default 50',
+      },
+      workflowDoc: {
+        type: 'string',
+        description: 'a document the new context should read after the hand-off; optional',
+      },
     },
-    required: ['runFolder'],
   })
+  expect(byName.hr_off!.description).toBe('Turn the context watch off.')
   expect(byName.hr_off!.inputSchema).toEqual({ type: 'object', properties: {} })
 
   // A missing folder is refused with the command's own words.
@@ -757,6 +841,63 @@ test('/hr-off during a clear keeps the watch off afterwards', async ($, on) => {
   await clock.advance(3000)
 
   expect(world.commands.filter(c => c === 'clear')).toEqual(['clear'])
+  expect(await header($)).not.toContain('HR')
+})
+
+// The resume prompt with no workflow document, as both modes send it.
+const RESUME_NUDGE = (handoff: string) =>
+  `[HR] Successor start. Read ${RUN}\\handoffs\\${handoff}, ${RUN}\\orchestrator-state.md and ` +
+  "the run-state file's 'how to resume' section in full, check CronList and re-create the " +
+  'heartbeat cron only if it is gone, call the mcp__workflow-orchestrator__hr_watch tool with runFolder ' +
+  `${RUN}, mode nudge, threshold 50, then continue from the handoff's next three actions.`
+
+test('in nudge mode, the person running /clear after the handoff gets the resume prompt once, and the watch re-arms', async ($, on) => {
+  const store = stateStore(on)
+  const { clock, world } = hrEngine(on)
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+
+  expect((await $.command.run({ command: 'hr-watch', args: RUN })).text).toBe(`HR armed on ${RUN} (nudge, 50%)`)
+  world.percent = 55
+  await clock.advance(1500)
+  expect(world.submits).toEqual([NUDGE_55])
+  world.handoffs = [{ name: 'h.md', kind: 'file', size: 1, mtimeMs: clock.now(), isLink: false }]
+  await $.turn.complete(mainTurnEnds)
+  await clock.advance(1500)
+  expect(await header($)).toContain('HR ready')
+  // The plugin never runs the clear itself in nudge mode.
+  expect(world.commands.filter(c => c === 'clear')).toEqual([])
+  expect(world.submits.length).toBe(1)
+
+  // The person runs /clear: the session starts over and the plugin's store reads as new.
+  store.forget('workflow-orchestrator')
+  world.startedAt = clock.now()
+  await clock.advance(1500)
+  expect(world.submits).toEqual([NUDGE_55, RESUME_NUDGE('h.md')])
+  expect(await header($)).toContain('HR nudge ·')
+
+  // Later polls send nothing more, and the context still over the threshold does not nudge.
+  await clock.advance(5000)
+  expect(world.submits.length).toBe(2)
+})
+
+test('in nudge mode, /hr-off while ready means a later /clear sends no resume prompt', async ($, on) => {
+  const store = stateStore(on)
+  const { clock, world } = hrEngine(on)
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+
+  await $.command.run({ command: 'hr-watch', args: RUN })
+  world.percent = 55
+  await clock.advance(1500)
+  world.handoffs = [{ name: 'h.md', kind: 'file', size: 1, mtimeMs: clock.now(), isLink: false }]
+  await $.turn.complete(mainTurnEnds)
+  await clock.advance(1500)
+  expect(await header($)).toContain('HR ready')
+
+  expect((await $.command.run({ command: 'hr-off', args: '' })).text).toBe('HR off')
+  store.forget('workflow-orchestrator')
+  world.startedAt = clock.now()
+  await clock.advance(3000)
+  expect(world.submits).toEqual([NUDGE_55])
   expect(await header($)).not.toContain('HR')
 })
 
