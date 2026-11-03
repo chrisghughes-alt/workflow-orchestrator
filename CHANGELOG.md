@@ -3,6 +3,15 @@
 All notable changes to this project are documented here. This project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## [2.0.1] — 2026-11-03
+
+### Fixed
+- A failed write of the sidebar's own records no longer fails the `tool.call`, `agent.spawn`,
+  `turn.step` or `turn.complete` hook; each calls `next(e)` once and returns its result.
+- `hr_watch` and `/hr-watch` refuse a `runFolder` or `workflowDoc` that is relative, over 1024
+  characters or carries control characters, and a `workflowDoc` that is not on disk, before either
+  path can reach a prompt.
+
 ## [2.0.0] — 2026-11-03
 
 ### Added
