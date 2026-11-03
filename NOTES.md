@@ -72,14 +72,16 @@ not touch the engine's own agent list or the session's crons, so background agen
 and the roster rows come back rebuilt from the engine's list, with an empty model and zeroed counters.
 In `auto` mode the plugin runs the clear itself, so its write after the clear lands on an empty store:
 the clear step uses the values it read **before** the clear, never values read from the store
-afterwards. In `nudge` mode the person runs `/clear`, the plugin writes nothing back, and the watch
-stays off until the successor calls `hr_watch`.
+afterwards. In `nudge` mode (since 2.1.0) the plugin keeps the pending resume in module memory when
+the watch reaches `ready`, detects the person's `/clear` from a change in `$.session.usage().startedAt`
+on the poll, then sends the same resume prompt auto mode sends and re-arms the watch with `waitsForDrop`
+set. `/hr-off` or a successful arm drops the pending resume, so a disarmed watch never resumes.
 
 ## The threshold across a clear
 
-A clear wipes the stored threshold along with everything else. In `auto` mode the plugin writes the
-watch back right after its own clear from the values it captured before it; in `nudge` mode nothing is
-written back. Either way the resume prompt repeats every `hr_watch` argument, so the successor re-arms
+A clear wipes the stored threshold along with everything else. In both modes the plugin writes the
+watch back from the values it captured before the clear (its own clear in `auto`, the person's in
+`nudge`), and the resume prompt repeats every `hr_watch` argument, so the successor re-arms
 identically. Arming again with the same folder and mode and no
 threshold keeps the stored threshold. The edge case: if the plugin's own write were lost before the
 successor's call, a call that leaves out the threshold would arm at the default of 50%. Repeating the

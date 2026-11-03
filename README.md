@@ -2,20 +2,37 @@
 
 A Claude Code plugin for running complicated workflows in long-running Claude Code sessions.
 
-```text
-/plugin marketplace add chrisghughes-alt/workflow-orchestrator
-/plugin install workflow-orchestrator
-```
-
-It does two things:
+It does two things, and you can use either one alone or both together:
 
 - **Agent management views.** A side pane that lists every background agent with its model, what it is
   doing, how long it has run, its tokens and its context. It appears by itself, with no setup.
 - **Pipeline enforcement.** A skill that drives your repository's `docs/WORKFLOW.md` phase by phase, and
   will not move on until each phase has produced its output and cleared its gate.
 
-You can use either one alone, or both together. A third part, the context watch, keeps a long-running
-session going across context resets; see [HR for AI](#hr-for-ai--context-cycling-without-losing-the-thread).
+A third part, the context watch, keeps a long-running session going across context resets; see
+[HR for AI](#hr-for-ai--context-cycling-without-losing-the-thread).
+
+## Install
+
+```text
+/plugin marketplace add chrisghughes-alt/workflow-orchestrator
+/plugin install workflow-orchestrator
+```
+
+On Claude Code 2.1.275 or later, one line does both:
+
+```text
+/plugin install workflow-orchestrator --marketplace chrisghughes-alt/workflow-orchestrator
+```
+
+## Get started
+
+1. **Install.** Run the two lines above.
+2. **Start any background agent.** The Agents pane opens by itself.
+3. **Type `/hr-watch`.** The context watch is now armed with its defaults.
+4. **If the repo has a `docs/WORKFLOW.md`,** type `/workflow-start <what you want done>`.
+5. **If it does not,** type `/workflow-capture` at the end of a session you would want to repeat. It
+   writes the workflow file for you.
 
 ## Agent management views
 
@@ -106,36 +123,72 @@ says nothing.
 
 ## HR for AI — context cycling without losing the thread
 
-A long-running orchestrator fills its context. Automatic compaction then blurs what it knew. A handoff
+A long-running session fills its context. Automatic compaction then blurs what it knew. A hand-off
 written to disk, followed by a fresh context that reads it, keeps the thread better. The context watch
 (shown as "HR" in the pane header) does that for you.
 
-The watch is off until armed, and it watches only the session that armed it.
+**What it watches.** The watch reads the main session's context gauge, the `ctx used N%` in the pane
+header, once a second. It watches only the session that armed it, and it is off until armed. The run
+folder is where the hand-off lands. The plugin looks in that folder only to see the hand-off file
+appear, which is its proof that the hand-off is written.
 
-**How it works.** Arm it with the `hr_watch` tool or the `/hr-watch` command, giving it the run folder.
-When the main session reaches the threshold, the watch submits one nudge. The nudge asks the model to
-write a handoff file to `<run folder>/handoffs/orchestrator-handoff-YYYYMMDD-HHMM.md`, update
-`<run folder>/orchestrator-state.md`, do whatever the workflow document requires at a handoff, and end
-its turn.
+**How to use it.** Type `/hr-watch` once. With no arguments it uses the folder `<repo>/.runs/hr/`
+(created when needed), nudge mode, and a 50% threshold.
+
+When the gauge reaches 50%, the plugin asks the model for a hand-off. The request tells the model where
+to write the hand-off file and that the file ends with a section headed **Next three actions**. The
+header then shows `HR nudged`.
 
 ![The pane header after the nudge: HR nudged beside the context gauge, with four agents listed](docs/images/hr-nudged.png)
 
-![The watch's nudge arriving in the conversation as a prompt from the plugin, after the arming reply](docs/images/hr-handoff.png)
+![The plugin's hand-off request arriving in the conversation as a prompt from the plugin, after the arming reply](docs/images/hr-handoff.png)
 
-When a new handoff file appears after that turn, the mode decides what happens next:
-
-- **`nudge`, the default.** The header shows `HR ready`. You run `/clear` and then the resume prompt
-  when you are ready. Use this when you are at the keyboard and want to read the handoff first.
-- **`auto`.** The plugin runs `/clear` itself and submits a resume prompt. The prompt names the handoff
-  file, the run-state file and the workflow document. It tells the new context to re-create the
-  heartbeat cron only if it is gone, to call `hr_watch` again with the same arguments, and to continue
-  from the handoff's "Next three actions". Without a workflow document, the prompt points at the
-  "how to resume" section of the run-state file instead. Use this for a long run with nobody at the
-  keyboard.
+When the header shows `HR ready`, type `/clear`. The plugin puts a resume prompt in front of the new
+context, and the new context continues from the hand-off's "Next three actions".
 
 ![A fresh context whose first prompt is the plugin's resume message, with the same four agents still in the pane](docs/images/hr-resumed.png)
 
-### What `/clear` keeps and what it resets
+### Advanced
+
+#### Auto mode
+
+In `auto` mode the plugin does not wait for you. When the hand-off file appears, it runs `/clear` itself
+and submits a resume prompt. The prompt names the hand-off file, the run-state file and the workflow
+document. It tells the new context to re-create the heartbeat cron only if it is gone, to call
+`hr_watch` again with the same arguments, and to continue from the hand-off's "Next three actions".
+Without a workflow document, the prompt points at the "how to resume" section of the run-state file
+instead. Use this for a long run with nobody at the keyboard. Use the default, `nudge`, when you are at
+the keyboard and want to read the hand-off first.
+
+#### Tools and commands
+
+| Tool or command | What it does |
+|---|---|
+| `mcp__workflow-orchestrator__hr_watch({ runFolder?, mode?, threshold?, workflowDoc? })` | Arms the watch. `runFolder` is where the hand-off lands, default `<repo>/.runs/hr`. `mode` is `nudge` (default, waits for you to `/clear`) or `auto` (clears and resumes by itself). `threshold` is the percent of context used, a whole number from 1 to 100, default 50. `workflowDoc` is a document the new context should read after the hand-off; optional. |
+| `mcp__workflow-orchestrator__hr_off()` | Turns the watch off. |
+| `/hr-watch [<folder>] [nudge\|auto] [key=value …]` | Arms the watch from the prompt. With no arguments it uses the defaults above. The keys are `mode`, `threshold` and `doc`. A bare threshold right after the mode word also works. |
+| `/hr-off` | Turns the watch off. |
+| `/agent-sidebar` | Opens the Agents pane. |
+
+The reply always states the mode and threshold, for example `HR armed on <folder> (nudge, 50%)`. When a
+workflow document was given, it adds `, doc <path>`.
+
+#### Paths
+
+The hand-off request asks the model to write the hand-off to
+`<run folder>/handoffs/orchestrator-handoff-YYYYMMDD-HHMM.md`, update
+`<run folder>/orchestrator-state.md`, do whatever the workflow document requires at a hand-off, and end
+its turn.
+
+A folder or document you give must be an absolute path and must exist; only the default folder is
+created for you. A path over 1024 characters or with control characters in it is refused, and the watch
+stays as it was. Give the folder to `/hr-watch` without quotes; spaces in it are fine. For example:
+
+```text
+/hr-watch <repo>/.runs/my-run mode=auto doc=<repo>/docs/my-fleet-WORKFLOW.md
+```
+
+#### What `/clear` keeps and what it resets
 
 | `/clear` keeps | `/clear` resets |
 |---|---|
@@ -143,29 +196,10 @@ When a new handoff file appears after that turn, the mode decides what happens n
 | The session's crons. | |
 | The roster in the pane. | |
 
-In `auto` mode the plugin writes the watch back right after its own clear. After a `/clear` you run in
-`nudge` mode, the watch stays off. Either way, the new context's `hr_watch` call arms it again with the
-same arguments.
-
-### Tools and commands
-
-| Tool or command | What it does |
-|---|---|
-| `mcp__workflow-orchestrator__hr_watch({ runFolder, mode?, threshold?, workflowDoc? })` | Arms the watch. `runFolder` is the run folder. `mode` is `nudge` (default) or `auto`. `threshold` is the percent of context used, a whole number from 1 to 100, default 50. `workflowDoc` is the workflow document the new context should read. |
-| `mcp__workflow-orchestrator__hr_off()` | Turns the watch off. |
-| `/hr-watch <folder> [nudge\|auto] [key=value …]` | Arms the watch from the prompt. The keys are `mode`, `threshold` and `doc`. A bare threshold right after the mode word also works. |
-| `/hr-off` | Turns the watch off. |
-| `/agent-sidebar` | Opens the Agents pane. |
-
-Paths must be absolute and must exist. A path over 1024 characters or with control characters in it is
-refused, and the watch stays as it was. Give the folder to `/hr-watch` without quotes; spaces in it are
-fine. For example:
-
-```text
-/hr-watch /path/to/repo/.runs/my-run mode=auto doc=/path/to/repo/docs/my-fleet-WORKFLOW.md
-```
-
-The reply always states the mode and threshold, for example `HR armed on <folder> (nudge, 50%)`.
+The plugin keeps what it needs in process memory, so a clear does not lose the hand-off: in `auto` mode
+it writes the watch back right after its own clear; in `nudge` mode it notices your `/clear`, sends the
+resume prompt, and arms the watch again. Either way, the new context's `hr_watch` call re-arms it with
+the same arguments.
 
 ## Together: running a workflow across a fleet
 
@@ -189,12 +223,12 @@ item tracker, naming, review chain and gates, is marked with a `<slot: …>` pla
      orchestrator-state.md   the run-state file: every ruling, dispatch and verification, as it happens
      briefs/                 one brief file per agent
      reports/                every report an agent writes
-     handoffs/               orchestrator and agent handoff files
+     handoffs/               orchestrator and agent hand-off files
    ```
 
-2. **A handoff shape** that ends with a section headed **Next three actions**. The new context continues
+2. **A hand-off shape** that ends with a section headed **Next three actions**. The new context continues
    from it.
-3. **A workflow document** the new context reads in full after a handoff, passed as `workflowDoc`.
+3. **A workflow document** the new context reads in full after a hand-off, passed as `workflowDoc`.
 4. **Arming at kickoff.** The orchestrator calls `hr_watch` with the run folder, the mode and the
    workflow document when a run starts, and calls `hr_off` when it ends.
 
@@ -211,22 +245,44 @@ These were measured, not assumed:
 - A background agent can call skills but not plugin commands. That is why the engine is the
   `workflow-orchestrator:workflow-start` skill rather than a command.
 
-## Install
+## For agents installing this plugin
+
+Paste this block into Claude Code, or into another agent, to have it install and check the plugin.
 
 ```text
-/plugin marketplace add chrisghughes-alt/workflow-orchestrator
-/plugin install workflow-orchestrator
-```
+Install and verify the workflow-orchestrator Claude Code plugin. Follow these steps in order.
 
-On Claude Code 2.1.275 or later, one line does both:
+1. Run: /plugin marketplace add chrisghughes-alt/workflow-orchestrator
+2. Run: /plugin install workflow-orchestrator
+3. Check the pane: start a trivial background agent (for example, one that replies "ok" and ends).
+   Confirm the Agents pane opened and lists that agent.
+4. Check the skill: confirm workflow-orchestrator:workflow-start appears exactly once in the skill
+   list. If it appears twice, the plugin is loaded twice; stop and tell the user.
+5. Check the tools: call mcp__workflow-orchestrator__agents. Expect a JSON array.
+6. Report the result of each check to the user.
 
-```text
-/plugin install workflow-orchestrator --marketplace chrisghughes-alt/workflow-orchestrator
+Only if this repository will run fleet workflows, also do the following:
+
+7. Copy examples/Native-Agent-Fleet-WORKFLOW.md from the plugin to docs/<name>-WORKFLOW.md in this
+   repository. Fill every <slot: ...> placeholder with this repository's own details; ask the user
+   for any you cannot find.
+8. Add .runs/ to this repository's .gitignore.
+9. At the start of each run, call mcp__workflow-orchestrator__hr_watch with runFolder set to the
+   absolute path of <repo>/.runs/<run-name> (create it first, with a handoffs/ subfolder), mode set
+   to nudge or auto as the user chooses, and workflowDoc set to the absolute path of
+   docs/<name>-WORKFLOW.md. For an ordinary session with no fleet, call it with no arguments.
+10. At the end of each run, call mcp__workflow-orchestrator__hr_off.
+
+Do not:
+- Edit the user's settings files without asking first.
+- Load the plugin through both the marketplace and CLAUDE_CODE_PLUGIN_DIRS at once. Every command,
+  tool and pane would appear twice.
 ```
 
 ## Loading the plugin
 
-- **Subscribers** install from this marketplace, as above, and update through `/plugin`.
+- **Subscribers** install from this marketplace, as in [Install](#install), and update through
+  `/plugin`.
 - **Developers** working on a local clone point the `CLAUDE_CODE_PLUGIN_DIRS` environment variable at
   the clone, which reloads the plugin as files change. While doing that, disable the installed copy,
   through `/plugin` or its entry in your settings' `enabledPlugins`.
