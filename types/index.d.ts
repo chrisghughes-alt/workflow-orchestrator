@@ -31,12 +31,29 @@ export type Gauge = {
   tokens?: number
 }
 
+// The context watch. `off` until /hr-watch arms it on a run folder; `armed`
+// waits for the gauge to reach the threshold; `nudged` has asked the main loop
+// for a handoff and waits for the file; `clearing` runs /clear and the resume.
+export type HrPhase = 'off' | 'armed' | 'nudged' | 'clearing'
+export type Hr = {
+  runFolder: string
+  phase: HrPhase
+  threshold: number
+  nudgedAt?: number
+  handoffPath?: string
+  // Set when the watch re-arms after a handoff: no new nudge until the gauge
+  // has read below the threshold, so a context still over it does not ask for
+  // a second handoff on the very next poll.
+  waitsForDrop?: boolean
+}
+
 declare module 'claude-code' {
   interface PluginState {
     'agent-sidebar': {
       agents: Shaped<Record<string, AgentRow>>
       now: number
       gauge: Gauge
+      hr: Hr
     }
   }
 }

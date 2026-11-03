@@ -1,5 +1,8 @@
 import { expect, mock, test } from 'claude-code/testing'
 
+import { finishClear, seeHandoff } from '../hooks/register'
+import type { Hr } from '../types'
+
 const PANE = {
   plugin: 'agent-sidebar',
   component: 'Pane',
@@ -185,6 +188,173 @@ test('the model can read the sidebar as JSON through the agents tool', async ($,
   expect(Object.keys(rows[0]!).sort()).toEqual(
     ['activity', 'context', 'endedAt', 'id', 'lastAt', 'model', 'name', 'startedAt', 'status', 'steps', 'tokensIn', 'tokensOut'].sort(),
   )
+})
+
+const RUN = 'C:\\runs\\r1'
+const NUDGE_55 =
+  `[HR] Context used 55%. Write the orchestrator handoff to ${RUN}\\handoffs\\orchestrator-handoff-YYYYMMDD-HHMM.md ` +
+  '(use the clock for the stamp), bring the Run tracker section of the run\'s plan document up to date and commit it ' +
+  `on main as a docs-only commit, update ${RUN}\\orchestrator-state.md, then end your turn.`
+
+type Fs = { name: string; kind: 'file' | 'dir' | 'other'; size: number; mtimeMs: number; isLink: boolean }
+
+// Stands in for the engine under the context watch: a run folder that exists,
+// a gauge the test sets, and a record of every prompt, command and toast.
+function hrEngine(on: Parameters<Parameters<typeof test>[1]>[1]) {
+  const clock = mock.clock(on)
+  const world = {
+    percent: 10 as number | undefined,
+    handoffs: [] as Fs[],
+    submits: [] as string[],
+    commands: [] as string[],
+    toasts: [] as string[],
+  }
+  on('agent.list', () => ({ value: [] }))
+  on('session.usage', () => usage(world.percent))
+  on('command.register', (_, e) => ({ value: { command: e.name } }))
+  on('tool.register', (_, e) => ({ value: { tool: `mcp__agent-sidebar__${e.name}` } }))
+  on('ui.open', () => ({ value: { isPlaced: true } }))
+  on('ui.toast', (_, e) => {
+    world.toasts.push(typeof e === 'string' ? e : JSON.stringify(e))
+    return { value: undefined }
+  })
+  on('session.start', (_, e) => ({ cwd: e.cwd }))
+  // The engine hands these hooks the path in Windows form, backslashes throughout.
+  on('fs.exists', (_, e) => ({ value: e.path === RUN }))
+  on('fs.list', (_, e) => ({ value: e.path === `${RUN}\\handoffs` ? world.handoffs : [] }))
+  on('prompt.submit', (_, e) => {
+    world.submits.push(e.text)
+    return { text: e.text }
+  })
+  on('command.run', (_, e) => {
+    world.commands.push(e.command)
+    return { text: '' }
+  })
+  on('turn.complete', () => ({ text: '' }))
+  return { clock, world }
+}
+
+async function header($: Parameters<Parameters<typeof test>[1]>[0]) {
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  const text = (await ui.find({ type: 'Text', text: /running/ }))?.text ?? ''
+  await ui.unmount()
+  return text
+}
+
+const mainTurnEnds = { answer: '', durationMs: 1, isAborted: false, turnId: 't1', reason: 'answer' } as const
+
+test('/hr-watch on a missing folder stays off', async ($, on) => {
+  const { clock } = hrEngine(on)
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+
+  const r = await $.command.run({ command: 'hr-watch', args: 'C:/runs/nope' })
+  expect(r.text).toContain('C:/runs/nope')
+  const none = await $.command.run({ command: 'hr-watch', args: '' })
+  expect(none.text).toBeDefined()
+  await clock.advance(1500)
+  expect(await header($)).not.toContain('HR')
+})
+
+test('the watch nudges once at the threshold, then waits for a new handoff file', async ($, on) => {
+  const { clock, world } = hrEngine(on)
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+
+  const r = await $.command.run({ command: 'hr-watch', args: RUN })
+  expect(r.text).toBe(`HR armed on ${RUN}`)
+  // Arming again changes nothing.
+  expect((await $.command.run({ command: 'hr-watch', args: RUN })).text).toBe(`HR armed on ${RUN}`)
+  await clock.advance(1500)
+  expect(await header($)).toContain('ctx used 10% · HR armed · 0 running')
+  expect(world.submits).toEqual([])
+
+  world.percent = 55
+  await clock.advance(1500)
+  expect(world.submits).toEqual([NUDGE_55])
+  expect(await header($)).toContain('HR nudged')
+
+  // A later poll over the threshold does not nudge again.
+  world.percent = 56
+  await clock.advance(3000)
+  expect(world.submits.length).toBe(1)
+
+  // The turn ends with no handoff written since the nudge: still waiting.
+  world.handoffs = [{ name: 'old.md', kind: 'file', size: 1, mtimeMs: 1, isLink: false }]
+  await $.turn.complete(mainTurnEnds)
+  await clock.advance(1500)
+  expect(await header($)).toContain('HR nudged')
+
+  // An agent's turn ending is not the main loop's.
+  world.handoffs.push({ name: 'agent.md', kind: 'file', size: 1, mtimeMs: clock.now(), isLink: false })
+  await $.turn.complete({ ...mainTurnEnds, agentId: 'a1' })
+  await clock.advance(1500)
+  expect(await header($)).toContain('HR nudged')
+
+  // The main turn ends with a new handoff: with /clear disabled the watch re-arms and does nothing else.
+  await $.turn.complete(mainTurnEnds)
+  await clock.advance(1500)
+  expect(await header($)).toContain('HR armed')
+  expect(world.commands.filter(c => c === 'clear')).toEqual([])
+  expect(world.submits.length).toBe(1)
+  expect(world.toasts.some(t => t.includes('HR: handoff seen; /clear disabled'))).toBe(true)
+
+  // Re-armed while still over the threshold: no second nudge until the gauge
+  // has dropped below it and climbed back.
+  await clock.advance(3000)
+  expect(world.submits.length).toBe(1)
+  world.percent = 30
+  await clock.advance(1500)
+  expect(world.submits.length).toBe(1)
+  world.percent = 60
+  await clock.advance(1500)
+  expect(world.submits.length).toBe(2)
+  expect(world.submits[1]).toContain('[HR] Context used 60%.')
+
+  // Off.
+  expect((await $.command.run({ command: 'hr-off', args: '' })).text).toBe('HR off')
+  await clock.advance(1500)
+  expect(await header($)).not.toContain('HR')
+})
+
+test('with /clear enabled, a seen handoff clears and then hands the successor its start prompt', async () => {
+  const nudged: Hr = { runFolder: RUN, phase: 'nudged', threshold: 50, nudgedAt: 5000 }
+  const toasts: string[] = []
+  const handoffs: Fs[] = [
+    { name: 'older.md', kind: 'file', size: 1, mtimeMs: 6000, isLink: false },
+    { name: 'newer.md', kind: 'file', size: 1, mtimeMs: 7000, isLink: false },
+    { name: 'notes.txt', kind: 'file', size: 1, mtimeMs: 9000, isLink: false },
+    { name: 'stale.md', kind: 'file', size: 1, mtimeMs: 4000, isLink: false },
+  ]
+  const seen = await seeHandoff(nudged, { list: async () => handoffs, toast: t => void toasts.push(t) }, true)
+  expect(seen.phase).toBe('clearing')
+  expect(seen.handoffPath).toBe(`${RUN}\\handoffs\\newer.md`)
+
+  const calls: string[] = []
+  const done = await finishClear(seen, {
+    clear: async () => void calls.push('clear'),
+    submit: async text => void calls.push(text),
+    toast: t => void toasts.push(t),
+  })
+  expect(done.phase).toBe('armed')
+  expect(done.waitsForDrop).toBe(true)
+  expect(calls).toEqual([
+    'clear',
+    `[HR] Successor start. Read ${RUN}\\handoffs\\newer.md, ${RUN}\\orchestrator-state.md and ` +
+      'C:\\Code-Repos\\Equipment Check\\docs\\Native-Agent-Workflow.md in full, re-arm the heartbeat cron, ' +
+      `run /hr-watch ${RUN}, then continue from the handoff's next three actions.`,
+  ])
+
+  // A failed clear: toast it, re-arm, and send no resume.
+  const failed: string[] = []
+  const after = await finishClear(seen, {
+    clear: async () => {
+      throw new Error('no clear here')
+    },
+    submit: async text => void failed.push(text),
+    toast: t => void toasts.push(t),
+  })
+  expect(after.phase).toBe('armed')
+  expect(failed).toEqual([])
+  expect(toasts.some(t => t.includes('no clear here'))).toBe(true)
 })
 
 test('a finished agent leaves the sidebar once the engine stops listing it', async ($, on) => {

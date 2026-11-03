@@ -1,7 +1,7 @@
 import { atom, read, update } from 'claude-code'
 import type { AgentInfo, Register } from 'claude-code'
 
-import type { AgentRow, Gauge } from '../types'
+import type { AgentRow, Gauge, Hr } from '../types'
 
 const PANE = 'agent-sidebar'
 const COMMAND = 'agent-sidebar'
@@ -13,6 +13,15 @@ const UNLISTED_GRACE_MS = 10_000
 // A running agent with no model request or tool call for this long is marked silent.
 const SILENT_MS = 10 * 60_000
 
+// The context watch: at this share of the main window used, ask for a handoff.
+const HR_THRESHOLD = 50
+// Stays false until the /clear survival test passes: a seen handoff then only
+// re-arms the watch, and nothing clears the conversation.
+const CLEAR_ENABLED = false
+const HR_WATCH = 'hr-watch'
+const HR_OFF = 'hr-off'
+const WORKFLOW_DOC = 'C:\\Code-Repos\\Equipment Check\\docs\\Native-Agent-Workflow.md'
+
 // Change the tag when AgentRow's fields change: a reload keeps what the old
 // code stored, and the tag makes the new code start fresh instead of misreading it.
 const agents = atom({ plugin: 'agent-sidebar', key: 'agents' } as const, {}, {
@@ -22,6 +31,78 @@ const agents = atom({ plugin: 'agent-sidebar', key: 'agents' } as const, {}, {
 const now = atom({ plugin: 'agent-sidebar', key: 'now' } as const, 0)
 // The main conversation's context window. `percent` is the share USED, not left.
 const gauge = atom({ plugin: 'agent-sidebar', key: 'gauge' } as const, { window: 0 } as Gauge)
+const hr = atom({ plugin: 'agent-sidebar', key: 'hr' } as const, {
+  runFolder: '',
+  phase: 'off',
+  threshold: HR_THRESHOLD,
+} as Hr)
+
+function nudgeText(percent: number, runFolder: string): string {
+  return (
+    `[HR] Context used ${Math.round(percent)}%. Write the orchestrator handoff to ${runFolder}\\handoffs\\orchestrator-handoff-YYYYMMDD-HHMM.md ` +
+    "(use the clock for the stamp), bring the Run tracker section of the run's plan document up to date and commit it " +
+    `on main as a docs-only commit, update ${runFolder}\\orchestrator-state.md, then end your turn.`
+  )
+}
+
+function resumeText(handoffPath: string, runFolder: string): string {
+  return (
+    `[HR] Successor start. Read ${handoffPath}, ${runFolder}\\orchestrator-state.md and ${WORKFLOW_DOC} in full, ` +
+    `re-arm the heartbeat cron, run /hr-watch ${runFolder}, then continue from the handoff's next three actions.`
+  )
+}
+
+// A path inside a folder, joined with the separator the folder already uses, so
+// a Windows path stays all backslashes.
+function within(folder: string, name: string): string {
+  const sep = folder.includes('\\') ? '\\' : '/'
+  return folder.endsWith(sep) ? `${folder}${name}` : `${folder}${sep}${name}`
+}
+
+type HandoffIo = {
+  list: (path: string) => Promise<readonly { name: string; kind: string; mtimeMs: number }[]>
+  toast: (text: string) => void
+}
+
+// After the main loop's turn ends while nudged: looks for a handoff written
+// since the nudge (the newest .md in the run's handoffs folder). None: still
+// nudged. Found: with /clear disabled the nudge did its job and the watch
+// re-arms; enabled, the next poll clears and resumes.
+export async function seeHandoff(state: Hr, io: HandoffIo, clearEnabled: boolean): Promise<Hr> {
+  if (state.phase !== 'nudged') return state
+  const since = state.nudgedAt ?? 0
+  const folder = within(state.runFolder, 'handoffs')
+  const entries = await io.list(folder)
+  const newest = entries
+    .filter(f => f.kind === 'file' && f.name.toLowerCase().endsWith('.md') && f.mtimeMs > since)
+    .sort((a, b) => b.mtimeMs - a.mtimeMs)[0]
+  if (newest === undefined) return state
+  const handoffPath = within(folder, newest.name)
+  if (!clearEnabled) {
+    io.toast('HR: handoff seen; /clear disabled')
+    return { ...state, handoffPath, phase: 'armed', waitsForDrop: true }
+  }
+  return { ...state, handoffPath, phase: 'clearing' }
+}
+
+type ClearIo = {
+  clear: () => Promise<unknown>
+  submit: (text: string) => Promise<unknown>
+  toast: (text: string) => void
+}
+
+// Clears the conversation, then hands the fresh one its start prompt. Run from
+// the poll, never from a hook the turn waits on, where the engine refuses a
+// slash command. Either way it ends armed.
+export async function finishClear(state: Hr, io: ClearIo): Promise<Hr> {
+  try {
+    await io.clear()
+    await io.submit(resumeText(state.handoffPath ?? '', state.runFolder))
+  } catch (error) {
+    io.toast(`HR: clear and resume failed: ${error instanceof Error ? error.message : String(error)}`)
+  }
+  return { ...state, phase: 'armed', waitsForDrop: true }
+}
 
 type Dollar = Parameters<typeof update>[0]
 type Map = Record<string, AgentRow>
@@ -164,6 +245,14 @@ export const register: Register = on => {
       name: COMMAND,
       description: 'Show the background agents sidebar',
     })
+    await $.command
+      .register({
+        name: HR_WATCH,
+        description: 'Arm the context watch: nudge a handoff at the threshold, then clear and resume',
+        argumentHint: '<run-folder>',
+      })
+      .catch(() => undefined)
+    await $.command.register({ name: HR_OFF, description: 'Disarm the context watch' }).catch(() => undefined)
     void $.ui.open({ id: PANE, title: 'Agents' })
     // A failed registration costs the model the tool, never the sidebar its poll.
     await $.tool
@@ -174,6 +263,40 @@ export const register: Register = on => {
         inputSchema: { type: 'object', properties: {} },
       })
       .catch(() => undefined)
+
+    // Asks the main loop for a handoff once, the first time an armed watch sees
+    // the gauge at the threshold. The phase moves to nudged before the prompt
+    // goes, so a later poll never sends a second one.
+    let isClearing = false
+    const nudgeAtThreshold = async (reading: Gauge) => {
+      const percent = reading.percent
+      if (percent === undefined) return
+      const seen = await read($, hr)
+      if (seen.phase !== 'armed') return
+      if (seen.waitsForDrop) {
+        if (percent < seen.threshold) {
+          await update($, hr, (cur: Hr) =>
+            cur.phase === 'armed' ? { ...cur, waitsForDrop: undefined } : cur,
+          )
+        }
+        return
+      }
+      if (percent < seen.threshold) return
+      const at = await $.clock.now()
+      let state: Hr | undefined
+      await update($, hr, (cur: Hr) => {
+        state = undefined
+        if (cur.phase !== 'armed' || cur.waitsForDrop || percent < cur.threshold) return cur
+        state = { ...cur, phase: 'nudged', nudgedAt: at, handoffPath: undefined }
+        return state
+      })
+      if (state === undefined) return
+      const runFolder = state.runFolder
+      void $.prompt.submit({ text: nudgeText(percent, runFolder) }).catch(async (error: unknown) => {
+        $.ui.toast(`HR: the handoff nudge failed, watch off: ${error instanceof Error ? error.message : String(error)}`)
+        await update($, hr, (cur: Hr) => (cur.phase === 'nudged' ? { ...cur, phase: 'off' } : cur))
+      })
+    }
 
     // Poll the engine's agent list: it is the only source of each agent's
     // status (running, idle, done). Write only on a change, so an idle
@@ -196,6 +319,24 @@ export const register: Register = on => {
         const reading: Gauge = { percent: context.percent, window: context.window, tokens: context.tokens }
         const last = await read($, gauge)
         if (JSON.stringify(reading) !== JSON.stringify(last)) await update($, gauge, () => reading)
+        await nudgeAtThreshold(reading)
+      })().catch(() => undefined)
+      // The clear and resume run here, off any hook, once a handoff was seen.
+      void (async () => {
+        if (isClearing) return
+        const state = await read($, hr)
+        if (state.phase !== 'clearing') return
+        isClearing = true
+        try {
+          const after = await finishClear(state, {
+            clear: () => $.command.run({ command: 'clear' }),
+            submit: text => $.prompt.submit({ text }),
+            toast: text => $.ui.toast(text),
+          })
+          await update($, hr, (cur: Hr) => (cur.phase === 'clearing' ? after : cur))
+        } finally {
+          isClearing = false
+        }
       })().catch(() => undefined)
     })
 
@@ -207,6 +348,26 @@ export const register: Register = on => {
 
     return { text: 'Agents sidebar opened.' }
   }).catch(() => ({ text: 'The agents sidebar could not open.' }))
+
+  // Arms the context watch on a run folder that exists. Arming it again on the
+  // same folder leaves it where it is (armed, or mid-nudge).
+  on('command.run', { command: HR_WATCH }, async ($, e) => {
+    const path = e.args.trim()
+    if (path === '') return { text: 'HR: give the run folder: /hr-watch <absolute path>. The watch stays off.' }
+    const exists = await $.fs.exists(path).catch(() => false)
+    if (!exists) return { text: `HR: no folder at ${path}. The watch stays off.` }
+    await update($, hr, (cur: Hr) =>
+      cur.runFolder === path && cur.phase !== 'off'
+        ? cur
+        : { runFolder: path, phase: 'armed', threshold: cur.threshold || HR_THRESHOLD },
+    )
+    return { text: `HR armed on ${path}` }
+  }).catch(() => ({ text: 'HR: the watch could not be armed.' }))
+
+  on('command.run', { command: HR_OFF }, async $ => {
+    await update($, hr, (cur: Hr) => ({ ...cur, phase: 'off', nudgedAt: undefined }))
+    return { text: 'HR off' }
+  }).catch(() => ({ text: 'HR: the watch could not be turned off.' }))
 
   // The spawn is the one place the engine says which model an agent runs on.
   on('agent.spawn', async ($, e, next) => {
@@ -261,7 +422,7 @@ export const register: Register = on => {
   })
 
   // The roster tool: the sidebar's rows, in the pane's order, as JSON.
-  on('tool.call', { tool: `mcp__agent-sidebar__${ROSTER_TOOL}` }, async $ => {
+  on('tool.call', { tool: 'mcp__agent-sidebar__agents' }, async $ => {
     const map = await read($, agents)
     return { result: JSON.stringify(ordered(map).map(rosterRow)) }
   }).catch(() => ({ deny: 'The agents sidebar could not be read.' }))
@@ -298,6 +459,21 @@ export const register: Register = on => {
         endedAt: row.isListed ? row.endedAt : at,
         lastAt: at,
       }))
+    } else {
+      // The main loop's turn ended: if the watch nudged, look for the handoff.
+      try {
+        const state = await read($, hr)
+        if (state.phase === 'nudged') {
+          const seen = await seeHandoff(
+            state,
+            { list: path => $.fs.list(path), toast: text => $.ui.toast(text) },
+            CLEAR_ENABLED,
+          )
+          if (seen !== state) await update($, hr, (cur: Hr) => (cur.phase === 'nudged' ? seen : cur))
+        }
+      } catch {
+        // The watch stays nudged; the next main turn's end looks again.
+      }
     }
 
     return r
@@ -308,6 +484,8 @@ export const register: Register = on => {
     const map = await read($, agents)
     const clock = await read($, now)
     const fill = await read($, gauge)
+    const watch = await read($, hr)
+    const hrPart = watch.phase === 'off' ? '' : ` · HR ${watch.phase}`
     const width = Math.max(20, e.props.bodyColumns ?? 40)
     const viewing = e.props.view?.agentId
 
@@ -323,7 +501,7 @@ export const register: Register = on => {
     return (
       <Box flexDirection="column">
         <Text dimColor>
-          ctx used {fill.percent === undefined ? '?' : Math.round(fill.percent)}% · {running} running ·{' '}
+          ctx used {fill.percent === undefined ? '?' : Math.round(fill.percent)}%{hrPart} · {running} running ·{' '}
           {rows.length - running} done · {tokens(spent)} out
         </Text>
         <Button key="main" plain onPress={() => void show()}>
