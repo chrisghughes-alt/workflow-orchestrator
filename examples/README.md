@@ -9,6 +9,7 @@ from simplest to most elaborate. For the directive format, see
 | [`minimal-WORKFLOW.md`](minimal-WORKFLOW.md) | 3 | You want the smallest real pipeline: plan → implement → verify, with a consent gate before implementing and before integrating. Start here. |
 | [`Simple-CLI-WORKFLOW.md`](Simple-CLI-WORKFLOW.md) | 5 | You want a compact pipeline with domain-specific discipline baked into phase gates (a real, sanitized data pipeline). |
 | [`Full-Stack-Example-WORKFLOW.md`](Full-Stack-Example-WORKFLOW.md) | 13 | You want an elaborate flow: lane classification, spec/plan review loops, sub-agent development, automated + manual UAT, and explicit merge/push gates (a real, sanitized web-app feature pipeline). |
+| [`Native-Agent-Fleet-WORKFLOW.md`](Native-Agent-Fleet-WORKFLOW.md) | 8 | You want to run work items across named background agents with the plugin's fleet mechanics: briefs as files, a heartbeat, the context watch, in-session succession and agent recycling. It is a template: `<slot: …>` markers show what your repository supplies, such as its methodology document, item tracker, naming, review chain and gates. |
 
 > The two "real" examples are actual project pipelines that have been **sanitized** — organization names
 > and internal references removed, and custom/private skill names annotated as examples. Treat the

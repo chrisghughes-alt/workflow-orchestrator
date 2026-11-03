@@ -1,3 +1,7 @@
+---
+description: Review the current session and interactively turn it into a docs/WORKFLOW.md (or a named docs/<slug>-WORKFLOW.md) that /workflow-start can run.
+---
+
 # Workflow Capture — Distill a Session into a Reusable Pipeline
 
 This command turns the **current Claude session** into a project `WORKFLOW.md` that
