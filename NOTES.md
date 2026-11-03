@@ -86,3 +86,10 @@ Test hooks for `$` operations answer `{ value: ... }`; test hooks for events ans
 - Unknown whether `/hr-watch`, as the successor prompt asks, can be run by the model itself. Slash commands are typed by the person, and nothing here gives the model a way to run one. The orchestrator should check this before enabling clear.
 - Unknown whether /clear re-fires session.start. If it does, a second 1-second poll would start in the same process, and the in-closure guard against overlapping clears would not be shared between the two polls.
 - Hot reload: this folder reloaded into live sessions on each save. A running session already shows the `agent-sidebar` MCP tool server.
+
+## Addendum, 2026-11-03 afternoon (v0.3.0)
+
+- `CLEAR_ENABLED` is now `true`: the `/clear` survival test and the full auto loop both passed live (details in `docs/Native-Agent-Workflow.md` of the Equipment Check repo, evidence rows 9 and 13). The old refusal reply "auto mode is not enabled in this build yet" is gone; `auto` arms as `HR armed on <folder> (auto)`.
+- `/clear` resets every plugin atom (HR state and roster counters) but not the engine's agent roster or session crons. The poll's write after the clear therefore has to land on a reset store (fixed in cba95a9); `finishClear` uses the values captured before the clear.
+- `hr_watch` / `/hr-watch` take an optional `threshold` (1 to 100, default 50) after the mode word; out-of-range values are refused and the state is left alone. Use a low value to exercise the loop in a scratch session.
+- Known coupling: `WORKFLOW_DOC` hardcodes the Equipment Check repo path, while the mod loads in every repo. Derive it from the run folder or take it as an `hr_watch` argument.
