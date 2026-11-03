@@ -3,6 +3,20 @@
 All notable changes to this project are documented here. This project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## [2.1.0] — 2026-11-03
+
+### Added
+- `/hr-watch` and `hr_watch` work with no arguments: the run folder defaults to `<repo>/.runs/hr`
+  (its `handoffs` folder is created when missing), the mode to `nudge` and the threshold to 50%.
+  `/hr-watch auto` arms the default folder in auto mode; `/hr-watch <folder> …` works as before.
+- In nudge mode the plugin now sends the resume prompt after you run /clear, the same one auto mode
+  sends, and re-arms the watch. `/hr-off` before the clear means no resume prompt.
+
+### Changed
+- The nudge names the hand-off's closing section: it ends with a section headed "Next three actions".
+- The tool and command descriptions are rewritten to say what is watched (the main session's
+  context gauge, read once a second) and what the run folder is for (where the hand-off lands).
+
 ## [2.0.1] — 2026-11-03
 
 ### Fixed
