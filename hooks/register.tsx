@@ -315,6 +315,17 @@ async function patch($: Dollar, id: string, at: number, fn: (row: AgentRow) => A
   await update($, agents, (map: Map) => ({ ...map, [id]: fn(map[id] ?? blank(id, at)) }))
 }
 
+// Runs the sidebar's own record-keeping around a hook's one next(e) call and
+// ignores its failure: a row that misses one update is caught up by the next
+// poll or step, while a failed hook would be reported and handed to its .catch.
+async function quietly(work: () => Promise<unknown>): Promise<void> {
+  try {
+    await work()
+  } catch {
+    // The row misses this one update.
+  }
+}
+
 // Folds the engine's agent list into what the sidebar keeps. The engine drops a
 // finished agent from its list a while after it ends, and from then on the
 // agent can no longer be opened, so the sidebar drops it too.
@@ -611,59 +622,68 @@ export const register: Register = on => {
   })).catch(() => ({ deny: 'HR: the watch could not be turned off.' }))
 
   // The spawn is the one place the engine says which model an agent runs on.
+  // The spawn runs once: next(e) is called exactly once and its result returned
+  // whatever the record-keeping after it does.
   on('agent.spawn', async ($, e, next) => {
     const r = await next(e)
-    if (r.agentId !== undefined) {
-      const id = r.agentId
-      const at = await $.clock.now()
-      await patch($, id, at, row => ({
-        ...row,
-        model: r.model,
-        description: e.description,
-        type: e.subagentType,
-        // Its first model request can land before the spawn resolves.
-        startedAt: Math.min(row.startedAt, at),
-        lastAt: at,
-      }))
+    const id = r.agentId
+    if (id !== undefined) {
+      await quietly(async () => {
+        const at = await $.clock.now()
+        await patch($, id, at, row => ({
+          ...row,
+          model: r.model,
+          description: e.description,
+          type: e.subagentType,
+          // Its first model request can land before the spawn resolves.
+          startedAt: Math.min(row.startedAt, at),
+          lastAt: at,
+        }))
+      })
     }
 
     return r
-    // On any failure here, let the spawn go through untouched.
-  }).catch(($, e, next) => next(e))
+    // A failure before the spawn ran lets it go through untouched; after it ran,
+    // nothing is called again and its result stands.
+  }).catch(($, e, next) => (next.called ? undefined : next(e)))
 
   // Each model request an agent makes: mark it thinking, then add up its tokens.
   on('turn.step', async function* ($, e, next) {
     if (e.agentId === undefined) return yield* next(e)
     const id = e.agentId
-    const start = await $.clock.now()
-    await patch($, id, start, row => ({
-      ...row,
-      model: row.model || e.model,
-      activity: 'thinking',
-      lastAt: start,
-    }))
+    await quietly(async () => {
+      const start = await $.clock.now()
+      await patch($, id, start, row => ({
+        ...row,
+        model: row.model || e.model,
+        activity: 'thinking',
+        lastAt: start,
+      }))
+    })
     const r = yield* next(e)
     const usage = r.usage
     if (usage !== null) {
-      const sent =
-        usage.input_tokens + usage.cache_read_input_tokens + usage.cache_creation_input_tokens
-      const at = await $.clock.now()
-      // Read from inside this agent's own hook, in case the engine scopes it to
-      // the agent. The contract does not say it does; unverified per agent.
-      const window = await $.session
-        .usage()
-        .then(u => u.context.window)
-        .catch(() => undefined)
-      await patch($, id, at, row => ({
-        ...row,
-        window: window ?? row.window,
-        model: row.model || usage.model,
-        tokensIn: row.tokensIn + sent,
-        tokensOut: row.tokensOut + usage.output_tokens,
-        context: sent + usage.output_tokens,
-        steps: row.steps + 1,
-        lastAt: at,
-      }))
+      await quietly(async () => {
+        const sent =
+          usage.input_tokens + usage.cache_read_input_tokens + usage.cache_creation_input_tokens
+        const at = await $.clock.now()
+        // Read from inside this agent's own hook, in case the engine scopes it to
+        // the agent. The contract does not say it does; unverified per agent.
+        const window = await $.session
+          .usage()
+          .then(u => u.context.window)
+          .catch(() => undefined)
+        await patch($, id, at, row => ({
+          ...row,
+          window: window ?? row.window,
+          model: row.model || usage.model,
+          tokensIn: row.tokensIn + sent,
+          tokensOut: row.tokensOut + usage.output_tokens,
+          context: sent + usage.output_tokens,
+          steps: row.steps + 1,
+          lastAt: at,
+        }))
+      })
     }
 
     return r
@@ -675,38 +695,48 @@ export const register: Register = on => {
     return { result: JSON.stringify(ordered(map).map(rosterRow)) }
   }).catch(() => ({ deny: 'The agents sidebar could not be read.' }))
 
-  // The tool an agent is running right now.
+  // The tool an agent is running right now. The tool runs once: next(e) is
+  // called exactly once and its result returned whatever the record-keeping
+  // around it does.
   on('tool.call', async ($, e, next) => {
     if (e.agentId === undefined) return next(e)
     const id = e.agentId
-    const at = await $.clock.now()
-    await patch($, id, at, row => ({ ...row, activity: e.tool, lastAt: at }))
+    await quietly(async () => {
+      const at = await $.clock.now()
+      await patch($, id, at, row => ({ ...row, activity: e.tool, lastAt: at }))
+    })
     try {
       return await next(e)
     } finally {
-      const end = await $.clock.now()
-      await patch($, id, end, row => ({
-        ...row,
-        activity: row.activity === e.tool ? 'thinking' : row.activity,
-        lastAt: end,
-      }))
+      await quietly(async () => {
+        const end = await $.clock.now()
+        await patch($, id, end, row => ({
+          ...row,
+          activity: row.activity === e.tool ? 'thinking' : row.activity,
+          lastAt: end,
+        }))
+      })
     }
-    // On any failure here, let the tool call go through untouched.
-  }).catch(($, e, next) => next(e))
+    // A failure before the tool ran lets it go through untouched; after it ran,
+    // nothing is called again and its result stands.
+  }).catch(($, e, next) => (next.called ? undefined : next(e)))
 
   // An agent's run ended. Agents the engine never lists (a workflow's) are
   // marked done here, since no list change will do it for them.
   on('turn.complete', async ($, e, next) => {
     const r = await next(e)
     if (e.agentId !== undefined) {
-      const at = await $.clock.now()
-      await patch($, e.agentId, at, row => ({
-        ...row,
-        activity: '',
-        status: row.isListed ? row.status : 'completed',
-        endedAt: row.isListed ? row.endedAt : at,
-        lastAt: at,
-      }))
+      const id = e.agentId
+      await quietly(async () => {
+        const at = await $.clock.now()
+        await patch($, id, at, row => ({
+          ...row,
+          activity: '',
+          status: row.isListed ? row.status : 'completed',
+          endedAt: row.isListed ? row.endedAt : at,
+          lastAt: at,
+        }))
+      })
     } else {
       // The main loop's turn ended: if the watch nudged, look for the handoff.
       try {
