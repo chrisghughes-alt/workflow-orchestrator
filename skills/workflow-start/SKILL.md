@@ -1,6 +1,12 @@
+---
+name: workflow-start
+description: Run a project's docs/WORKFLOW.md pipeline (or the file named by a leading --file) phase by phase under binding rules for order, outputs and consent gates. Use when asked to start or drive a workflow, or when a brief says to run workflow-start.
+argument-hint: "[--file <path>] <work description>"
+---
+
 # Workflow Start — Generic Pipeline Orchestrator
 
-This command is a **project-agnostic orchestration engine**. It knows nothing about any specific phase, skill,
+This skill is a **project-agnostic orchestration engine**. It knows nothing about any specific phase, skill,
 or artifact path. It loads the **current project's** pipeline definition from `docs/WORKFLOW.md` and executes
 it under a fixed set of binding rules.
 
@@ -52,7 +58,7 @@ substring `--file` is treated as plain text (e.g. ``--file "my docs/pipeline.md"
 path that contains spaces).
 
 `WORK` is the work description (feature, bug, or change to start the pipeline on). If `WORK` is empty, ask the
-user to describe the work before Step 0, then treat their answer as `WORK`. Throughout the rest of this command, **`WORK` is the value passed to
+user to describe the work before Step 0, then treat their answer as `WORK`. Throughout the rest of this skill, **`WORK` is the value passed to
 invoked skills** — never the raw `$ARGUMENTS` (which may still carry the `--file <path>` prefix).
 
 ---
