@@ -73,6 +73,47 @@ test('a value an earlier version stored is declined', async ($, on) => {
   await ui.unmount()
 })
 
+// Stands in for $.session.usage(): the main conversation's context window.
+function usage(percent: number | undefined) {
+  return {
+    value: {
+      startedAt: 0,
+      context: { window: 200_000, percent, tokens: percent === undefined ? undefined : percent * 2000 },
+      rateLimits: [],
+    },
+  }
+}
+
+test('the header shows how much of the main context window is used', async ($, on) => {
+  const clock = mock.clock(on)
+  on('agent.list', () => ({ value: [] }))
+  on('session.usage', () => usage(43))
+  on('command.register', (_, e) => ({ value: { command: e.name } }))
+  on('ui.open', () => ({ value: { isPlaced: true } }))
+  on('session.start', (_, e) => ({ cwd: e.cwd }))
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+
+  await clock.advance(1500)
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect((await ui.find({ type: 'Text', text: /running/ }))?.text).toContain('ctx used 43%')
+  await ui.unmount()
+})
+
+test('the header says ? when the context share is not known yet', async ($, on) => {
+  const clock = mock.clock(on)
+  on('agent.list', () => ({ value: [] }))
+  on('session.usage', () => usage(undefined))
+  on('command.register', (_, e) => ({ value: { command: e.name } }))
+  on('ui.open', () => ({ value: { isPlaced: true } }))
+  on('session.start', (_, e) => ({ cwd: e.cwd }))
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+
+  await clock.advance(1500)
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect((await ui.find({ type: 'Text', text: /running/ }))?.text).toContain('ctx used ?%')
+  await ui.unmount()
+})
+
 test('a finished agent leaves the sidebar once the engine stops listing it', async ($, on) => {
   const clock = mock.clock(on)
   let list: { id: string; description: string; type: string; status: string }[] = [

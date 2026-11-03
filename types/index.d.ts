@@ -23,11 +23,20 @@ export type AgentRow = {
   isListed: boolean
 }
 
+// The main conversation's context window, as $.session.usage() last reported it.
+// `percent` is the share USED (tokens over window, 0-100), not the share left.
+export type Gauge = {
+  percent?: number
+  window: number
+  tokens?: number
+}
+
 declare module 'claude-code' {
   interface PluginState {
     'agent-sidebar': {
       agents: Shaped<Record<string, AgentRow>>
       now: number
+      gauge: Gauge
     }
   }
 }

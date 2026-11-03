@@ -1,7 +1,7 @@
 import { atom, read, update } from 'claude-code'
 import type { AgentInfo, Register } from 'claude-code'
 
-import type { AgentRow } from '../types'
+import type { AgentRow, Gauge } from '../types'
 
 const PANE = 'agent-sidebar'
 const COMMAND = 'agent-sidebar'
@@ -16,6 +16,8 @@ const agents = atom({ plugin: 'agent-sidebar', key: 'agents' } as const, {}, {
 })
 // The clock the pane draws elapsed times from; ticks only while an agent runs.
 const now = atom({ plugin: 'agent-sidebar', key: 'now' } as const, 0)
+// The main conversation's context window. `percent` is the share USED, not left.
+const gauge = atom({ plugin: 'agent-sidebar', key: 'gauge' } as const, { window: 0 } as Gauge)
 
 type Dollar = Parameters<typeof update>[0]
 type Map = Record<string, AgentRow>
@@ -141,6 +143,14 @@ export const register: Register = on => {
           await update($, now, () => at)
         }
       })()
+      // Separate from the list refresh, so a failed usage read never stops it.
+      void (async () => {
+        const { context } = await $.session.usage()
+        // `percent` is tokens over window: the share of the window USED, not left.
+        const reading: Gauge = { percent: context.percent, window: context.window, tokens: context.tokens }
+        const last = await read($, gauge)
+        if (JSON.stringify(reading) !== JSON.stringify(last)) await update($, gauge, () => reading)
+      })().catch(() => undefined)
     })
 
     return next(e)
@@ -245,6 +255,7 @@ export const register: Register = on => {
     const { Box, Text, Button } = $.ui.resolve(e)
     const map = await read($, agents)
     const clock = await read($, now)
+    const fill = await read($, gauge)
     const width = Math.max(20, e.props.bodyColumns ?? 40)
     const viewing = e.props.view?.agentId
 
@@ -264,7 +275,8 @@ export const register: Register = on => {
     return (
       <Box flexDirection="column">
         <Text dimColor>
-          {running} running · {rows.length - running} done · {tokens(spent)} out
+          ctx used {fill.percent === undefined ? '?' : Math.round(fill.percent)}% · {running} running ·{' '}
+          {rows.length - running} done · {tokens(spent)} out
         </Text>
         <Button key="main" plain onPress={() => void show()}>
           {viewing === undefined ? '▸ ' : '  '}
