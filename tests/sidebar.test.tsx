@@ -146,6 +146,47 @@ test('an agent with no activity for over ten minutes is marked silent, a done on
   expect(await stats()).not.toContain('silent')
 })
 
+test('the model can read the sidebar as JSON through the agents tool', async ($, on) => {
+  const clock = mock.clock(on)
+  on('agent.list', () => ({ value: [] }))
+  on('session.usage', () => usage(10))
+  on('command.register', (_, e) => ({ value: { command: e.name } }))
+  on('ui.open', () => ({ value: { isPlaced: true } }))
+  on('session.start', (_, e) => ({ cwd: e.cwd }))
+  const registered: { name: string; description: string; inputSchema?: unknown }[] = []
+  on('tool.register', (_, e) => {
+    registered.push(e)
+    return { value: { tool: `mcp__agent-sidebar__${e.name}` } }
+  })
+  on('agent.spawn', () => ({ model: 'claude-sonnet-5-5', agentId: 'a1' }))
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+
+  expect(registered.map(t => t.name)).toEqual(['agents'])
+  expect(registered[0]!.inputSchema).toEqual({ type: 'object', properties: {} })
+
+  await $.agent.spawn({ prompt: 'look around', description: 'Survey the repo' })
+  await clock.advance(1500)
+
+  const r = await $.tool.call({ tool: 'mcp__agent-sidebar__agents' } as never)
+  const rows = JSON.parse(r.result as string) as Record<string, unknown>[]
+  expect(rows.length).toBe(1)
+  expect(rows[0]).toEqual(
+    expect.objectContaining({
+      name: 'Survey the repo',
+      id: 'a1',
+      model: 'claude-sonnet-5-5',
+      status: 'running',
+      tokensIn: 0,
+      tokensOut: 0,
+      context: 0,
+      steps: 0,
+    }),
+  )
+  expect(Object.keys(rows[0]!).sort()).toEqual(
+    ['activity', 'context', 'endedAt', 'id', 'lastAt', 'model', 'name', 'startedAt', 'status', 'steps', 'tokensIn', 'tokensOut'].sort(),
+  )
+})
+
 test('a finished agent leaves the sidebar once the engine stops listing it', async ($, on) => {
   const clock = mock.clock(on)
   let list: { id: string; description: string; type: string; status: string }[] = [

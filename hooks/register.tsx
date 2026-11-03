@@ -5,6 +5,8 @@ import type { AgentRow, Gauge } from '../types'
 
 const PANE = 'agent-sidebar'
 const COMMAND = 'agent-sidebar'
+// The model calls it as mcp__agent-sidebar__agents.
+const ROSTER_TOOL = 'agents'
 const MAX_ROWS = 40
 const POLL_MS = 1000
 const UNLISTED_GRACE_MS = 10_000
@@ -82,6 +84,39 @@ function merge(map: Map, list: readonly AgentInfo[], at: number): Map {
   return Object.fromEntries(kept.map(row => [row.id, row]))
 }
 
+// The pane's order: running agents first, then done ones, newest first within each.
+function ordered(map: Map): AgentRow[] {
+  return Object.values(map).sort((a, b) => {
+    const aDone = DONE.has(a.status) ? 1 : 0
+    const bDone = DONE.has(b.status) ? 1 : 0
+    return aDone - bDone || b.startedAt - a.startedAt
+  })
+}
+
+// The name a row shows under: the engine's name, else what it was spawned to do.
+function labelOf(row: AgentRow): string {
+  return row.name ?? (row.description || row.type || row.id)
+}
+
+// One row as the agents tool hands it to the model. `endedAt` is null while it
+// runs, so the key is always there (JSON drops an undefined one).
+function rosterRow(row: AgentRow) {
+  return {
+    name: labelOf(row),
+    id: row.id,
+    model: row.model,
+    status: row.status,
+    activity: row.activity,
+    tokensIn: row.tokensIn,
+    tokensOut: row.tokensOut,
+    context: row.context,
+    steps: row.steps,
+    startedAt: row.startedAt,
+    lastAt: row.lastAt,
+    endedAt: row.endedAt ?? null,
+  }
+}
+
 // Each model family gets a color, and also a glyph and a text tag, so the
 // model can be told apart without relying on color.
 function family(model: string): { tag: string; glyph: string; color: string } {
@@ -130,6 +165,15 @@ export const register: Register = on => {
       description: 'Show the background agents sidebar',
     })
     void $.ui.open({ id: PANE, title: 'Agents' })
+    // A failed registration costs the model the tool, never the sidebar its poll.
+    await $.tool
+      .register({
+        name: ROSTER_TOOL,
+        description:
+          'The agents sidebar as JSON: one row per background agent with name, model, status, activity, tokens, context size and timestamps. Read-only.',
+        inputSchema: { type: 'object', properties: {} },
+      })
+      .catch(() => undefined)
 
     // Poll the engine's agent list: it is the only source of each agent's
     // status (running, idle, done). Write only on a change, so an idle
@@ -216,6 +260,12 @@ export const register: Register = on => {
     return r
   })
 
+  // The roster tool: the sidebar's rows, in the pane's order, as JSON.
+  on('tool.call', { tool: `mcp__agent-sidebar__${ROSTER_TOOL}` }, async $ => {
+    const map = await read($, agents)
+    return { result: JSON.stringify(ordered(map).map(rosterRow)) }
+  }).catch(() => ({ deny: 'The agents sidebar could not be read.' }))
+
   // The tool an agent is running right now.
   on('tool.call', async ($, e, next) => {
     if (e.agentId === undefined) return next(e)
@@ -261,11 +311,7 @@ export const register: Register = on => {
     const width = Math.max(20, e.props.bodyColumns ?? 40)
     const viewing = e.props.view?.agentId
 
-    const rows = Object.values(map).sort((a, b) => {
-      const aDone = DONE.has(a.status) ? 1 : 0
-      const bDone = DONE.has(b.status) ? 1 : 0
-      return aDone - bDone || b.startedAt - a.startedAt
-    })
+    const rows = ordered(map)
     const running = rows.filter(row => !DONE.has(row.status)).length
     const spent = rows.reduce((sum, row) => sum + row.tokensOut, 0)
 
@@ -290,7 +336,7 @@ export const register: Register = on => {
           const st = state(row)
           const isDone = DONE.has(row.status)
           const isViewed = viewing === row.id
-          const label = row.name ?? (row.description || row.type || row.id)
+          const label = labelOf(row)
           const elapsed = duration((row.endedAt ?? (clock || row.lastAt)) - row.startedAt)
           const quiet = isDone ? 0 : clock - row.lastAt
           return (
