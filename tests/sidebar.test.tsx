@@ -164,8 +164,8 @@ test('the model can read the sidebar as JSON through the agents tool', async ($,
   on('agent.spawn', () => ({ model: 'claude-sonnet-5-5', agentId: 'a1' }))
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
 
-  expect(registered.map(t => t.name)).toEqual(['agents'])
-  expect(registered[0]!.inputSchema).toEqual({ type: 'object', properties: {} })
+  const roster = registered.find(t => t.name === 'agents')
+  expect(roster?.inputSchema).toEqual({ type: 'object', properties: {} })
 
   await $.agent.spawn({ prompt: 'look around', description: 'Survey the repo' })
   await clock.advance(1500)
@@ -244,11 +244,15 @@ function hrEngine(on: Parameters<Parameters<typeof test>[1]>[1]) {
     submits: [] as string[],
     commands: [] as string[],
     toasts: [] as string[],
+    tools: [] as { name: string; description: string; inputSchema: Record<string, unknown> }[],
   }
   on('agent.list', () => ({ value: [] }))
   on('session.usage', () => usage(world.percent))
   on('command.register', (_, e) => ({ value: { command: e.name } }))
-  on('tool.register', (_, e) => ({ value: { tool: `mcp__agent-sidebar__${e.name}` } }))
+  on('tool.register', (_, e) => {
+    world.tools.push(e)
+    return { value: { tool: `mcp__agent-sidebar__${e.name}` } }
+  })
   on('ui.open', () => ({ value: { isPlaced: true } }))
   on('ui.toast', (_, e) => {
     world.toasts.push(typeof e === 'string' ? e : JSON.stringify(e))
@@ -304,6 +308,41 @@ test('/hr-watch with a mode word: nudge arms in nudge, auto is refused while /cl
   expect(auto.text).toBe('auto mode is not enabled in this build yet; armed in nudge mode')
   await clock.advance(1500)
   expect(await header($)).toContain('HR nudge ·')
+})
+
+test('the model arms and disarms the watch through the hr_watch and hr_off tools', async ($, on) => {
+  const { clock, world } = hrEngine(on)
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+
+  const byName = Object.fromEntries(world.tools.map(t => [t.name, t]))
+  expect(Object.keys(byName).sort()).toEqual(['agents', 'hr_off', 'hr_watch'])
+  expect(byName.hr_watch!.inputSchema).toEqual({
+    type: 'object',
+    properties: { runFolder: { type: 'string' }, mode: { type: 'string', enum: ['nudge', 'auto'] } },
+    required: ['runFolder'],
+  })
+  expect(byName.hr_off!.inputSchema).toEqual({ type: 'object', properties: {} })
+
+  // A missing folder is refused with the command's own words.
+  const refused = await $.tool.call({ tool: 'mcp__agent-sidebar__hr_watch', runFolder: 'C:/runs/nope' } as never)
+  const typed = await $.command.run({ command: 'hr-watch', args: 'C:/runs/nope' })
+  expect(refused.result).toBe(typed.text)
+  await clock.advance(1500)
+  expect(await header($)).not.toContain('HR')
+
+  const armed = await $.tool.call({ tool: 'mcp__agent-sidebar__hr_watch', runFolder: RUN, mode: 'nudge' } as never)
+  expect(armed.result).toBe(`HR armed on ${RUN}`)
+  await clock.advance(1500)
+  expect(await header($)).toContain('ctx used 10% · HR nudge · 0 running')
+
+  // Auto while /clear is disabled: the command's reply, armed in nudge.
+  const auto = await $.tool.call({ tool: 'mcp__agent-sidebar__hr_watch', runFolder: RUN, mode: 'auto' } as never)
+  expect(auto.result).toBe('auto mode is not enabled in this build yet; armed in nudge mode')
+
+  const off = await $.tool.call({ tool: 'mcp__agent-sidebar__hr_off' } as never)
+  expect(off.result).toBe('HR off')
+  await clock.advance(1500)
+  expect(await header($)).not.toContain('HR')
 })
 
 test('the watch nudges once at the threshold, then waits for a new handoff file', async ($, on) => {

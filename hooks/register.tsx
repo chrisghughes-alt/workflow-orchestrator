@@ -325,6 +325,26 @@ export const register: Register = on => {
         inputSchema: { type: 'object', properties: {} },
       })
       .catch(() => undefined)
+    // The watch's two doors for the model, which cannot run slash commands.
+    await $.tool
+      .register({
+        name: 'hr_watch',
+        description:
+          'Arm the context watch for this session: nudge for a handoff at 50% context used, then (mode auto) clear and resume, or (mode nudge, the default) wait for the owner. Pass the absolute run folder.',
+        inputSchema: {
+          type: 'object',
+          properties: { runFolder: { type: 'string' }, mode: { type: 'string', enum: ['nudge', 'auto'] } },
+          required: ['runFolder'],
+        },
+      })
+      .catch(() => undefined)
+    await $.tool
+      .register({
+        name: 'hr_off',
+        description: 'Disarm the context watch.',
+        inputSchema: { type: 'object', properties: {} },
+      })
+      .catch(() => undefined)
 
     // Asks the main loop for a handoff once, the first time an armed watch sees
     // the gauge at the threshold. The phase moves to nudged before the prompt
@@ -421,6 +441,19 @@ export const register: Register = on => {
   on('command.run', { command: HR_OFF }, async $ => ({ text: await disarmWatch($) })).catch(() => ({
     text: 'HR: the watch could not be turned off.',
   }))
+
+  // The same two functions as the commands above, for the model: the reply
+  // text comes back as the tool's result.
+  on('tool.call', { tool: 'mcp__agent-sidebar__hr_watch' }, async ($, e) => {
+    const input = e as unknown as { runFolder?: unknown; mode?: unknown }
+    const runFolder = typeof input.runFolder === 'string' ? input.runFolder : ''
+    const mode = typeof input.mode === 'string' ? input.mode : undefined
+    return { result: await armWatch($, runFolder, mode) }
+  }).catch(() => ({ deny: 'HR: the watch could not be armed.' }))
+
+  on('tool.call', { tool: 'mcp__agent-sidebar__hr_off' }, async $ => ({
+    result: await disarmWatch($),
+  })).catch(() => ({ deny: 'HR: the watch could not be turned off.' }))
 
   // The spawn is the one place the engine says which model an agent runs on.
   on('agent.spawn', async ($, e, next) => {
