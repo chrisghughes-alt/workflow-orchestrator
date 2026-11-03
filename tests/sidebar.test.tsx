@@ -466,6 +466,27 @@ test('in auto mode with /clear enabled, a seen handoff clears and then hands the
   expect(toasts.some(t => t.includes('no clear here'))).toBe(true)
 })
 
+test('a second session start, as /clear may raise, leaves one poll running, not two', async ($, on) => {
+  const clock = mock.clock(on)
+  let lists = 0
+  on('agent.list', () => {
+    lists += 1
+    return { value: [] }
+  })
+  on('session.usage', () => usage(10))
+  on('command.register', (_, e) => ({ value: { command: e.name } }))
+  on('tool.register', (_, e) => ({ value: { tool: `mcp__agent-sidebar__${e.name}` } }))
+  on('ui.open', () => ({ value: { isPlaced: true } }))
+  on('session.start', (_, e) => ({ cwd: e.cwd }))
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await clock.advance(2000)
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+
+  lists = 0
+  await clock.advance(5000)
+  expect(lists).toBe(5)
+})
+
 test('a finished agent leaves the sidebar once the engine stops listing it', async ($, on) => {
   const clock = mock.clock(on)
   let list: { id: string; description: string; type: string; status: string }[] = [

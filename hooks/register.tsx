@@ -1,5 +1,5 @@
 import { atom, read, update } from 'claude-code'
-import type { AgentInfo, Register } from 'claude-code'
+import type { AgentInfo, Register, Timer } from 'claude-code'
 
 import type { AgentRow, Gauge, Hr, HrMode } from '../types'
 
@@ -115,6 +115,12 @@ export async function finishClear(state: Hr, io: ClearIo): Promise<Hr> {
 
 type Dollar = Parameters<typeof update>[0]
 type Map = Record<string, AgentRow>
+
+// Kept per process, not per session start: the one running poll, and whether a
+// clear and resume is in flight. A /clear that raises a new session start
+// mid-clear must neither start a second poll nor a second clear.
+let poll: Timer | undefined
+let isClearing = false
 
 // Splits /hr-watch's arguments into the run folder and an optional last word
 // naming the mode. The folder may hold spaces, so only a last word of nudge or
@@ -353,7 +359,6 @@ export const register: Register = on => {
     // Asks the main loop for a handoff once, the first time an armed watch sees
     // the gauge at the threshold. The phase moves to nudged before the prompt
     // goes, so a later poll never sends a second one.
-    let isClearing = false
     const nudgeAtThreshold = async (reading: Gauge) => {
       const percent = reading.percent
       if (percent === undefined) return
@@ -387,7 +392,15 @@ export const register: Register = on => {
     // Poll the engine's agent list: it is the only source of each agent's
     // status (running, idle, done). Write only on a change, so an idle
     // session does not redraw every second.
-    $.clock.every(POLL_MS, () => {
+    // One poll per process: a later session start (a /clear may raise one)
+    // stops the poll before it and starts one on the new session, so there are
+    // never two, and never none if the old session's timer died with it.
+    try {
+      poll?.cancel()
+    } catch {
+      // A timer of a session already gone; nothing left to stop.
+    }
+    poll = $.clock.every(POLL_MS, () => {
       void (async () => {
         const [list, at, map] = await Promise.all([$.agent.list(), $.clock.now(), read($, agents)])
         const merged = merge(map, list, at)
