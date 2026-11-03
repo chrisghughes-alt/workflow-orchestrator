@@ -77,10 +77,11 @@ test('a value an earlier version stored is declined', async ($, on) => {
 })
 
 // Stands in for $.session.usage(): the main conversation's context window.
-function usage(percent: number | undefined) {
+// `startedAt` is when the session began; a /clear starts it over.
+function usage(percent: number | undefined, startedAt = 0) {
   return {
     value: {
-      startedAt: 0,
+      startedAt,
       context: { window: 200_000, percent, tokens: percent === undefined ? undefined : percent * 2000 },
       rateLimits: [],
     },
@@ -252,6 +253,8 @@ function hrEngine(on: Parameters<Parameters<typeof test>[1]>[1]) {
   const clock = mock.clock(on)
   const world = {
     percent: 10 as number | undefined,
+    // When the session began, as $.session.usage() reports it; a /clear moves it.
+    startedAt: 0,
     handoffs: [] as Fs[],
     submits: [] as string[],
     commands: [] as string[],
@@ -274,7 +277,7 @@ function hrEngine(on: Parameters<Parameters<typeof test>[1]>[1]) {
     return { value: undefined }
   })
   on('agent.list', () => ({ value: [] }))
-  on('session.usage', () => usage(world.percent))
+  on('session.usage', () => usage(world.percent, world.startedAt))
   on('command.register', (_, e) => ({ value: { command: e.name } }))
   on('tool.register', (_, e) => {
     world.tools.push(e)
@@ -838,6 +841,63 @@ test('/hr-off during a clear keeps the watch off afterwards', async ($, on) => {
   await clock.advance(3000)
 
   expect(world.commands.filter(c => c === 'clear')).toEqual(['clear'])
+  expect(await header($)).not.toContain('HR')
+})
+
+// The resume prompt with no workflow document, as both modes send it.
+const RESUME_NUDGE = (handoff: string) =>
+  `[HR] Successor start. Read ${RUN}\\handoffs\\${handoff}, ${RUN}\\orchestrator-state.md and ` +
+  "the run-state file's 'how to resume' section in full, check CronList and re-create the " +
+  'heartbeat cron only if it is gone, call the mcp__workflow-orchestrator__hr_watch tool with runFolder ' +
+  `${RUN}, mode nudge, threshold 50, then continue from the handoff's next three actions.`
+
+test('in nudge mode, the person running /clear after the handoff gets the resume prompt once, and the watch re-arms', async ($, on) => {
+  const store = stateStore(on)
+  const { clock, world } = hrEngine(on)
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+
+  expect((await $.command.run({ command: 'hr-watch', args: RUN })).text).toBe(`HR armed on ${RUN} (nudge, 50%)`)
+  world.percent = 55
+  await clock.advance(1500)
+  expect(world.submits).toEqual([NUDGE_55])
+  world.handoffs = [{ name: 'h.md', kind: 'file', size: 1, mtimeMs: clock.now(), isLink: false }]
+  await $.turn.complete(mainTurnEnds)
+  await clock.advance(1500)
+  expect(await header($)).toContain('HR ready')
+  // The plugin never runs the clear itself in nudge mode.
+  expect(world.commands.filter(c => c === 'clear')).toEqual([])
+  expect(world.submits.length).toBe(1)
+
+  // The person runs /clear: the session starts over and the plugin's store reads as new.
+  store.forget('workflow-orchestrator')
+  world.startedAt = clock.now()
+  await clock.advance(1500)
+  expect(world.submits).toEqual([NUDGE_55, RESUME_NUDGE('h.md')])
+  expect(await header($)).toContain('HR nudge ·')
+
+  // Later polls send nothing more, and the context still over the threshold does not nudge.
+  await clock.advance(5000)
+  expect(world.submits.length).toBe(2)
+})
+
+test('in nudge mode, /hr-off while ready means a later /clear sends no resume prompt', async ($, on) => {
+  const store = stateStore(on)
+  const { clock, world } = hrEngine(on)
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+
+  await $.command.run({ command: 'hr-watch', args: RUN })
+  world.percent = 55
+  await clock.advance(1500)
+  world.handoffs = [{ name: 'h.md', kind: 'file', size: 1, mtimeMs: clock.now(), isLink: false }]
+  await $.turn.complete(mainTurnEnds)
+  await clock.advance(1500)
+  expect(await header($)).toContain('HR ready')
+
+  expect((await $.command.run({ command: 'hr-off', args: '' })).text).toBe('HR off')
+  store.forget('workflow-orchestrator')
+  world.startedAt = clock.now()
+  await clock.advance(3000)
+  expect(world.submits).toEqual([NUDGE_55])
   expect(await header($)).not.toContain('HR')
 })
 

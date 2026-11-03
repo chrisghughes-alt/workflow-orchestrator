@@ -139,6 +139,14 @@ let isOffDuringClear = false
 // Set once the poll has opened the Agents pane for the first background agent,
 // or the person opened it with the command, so later polls never open it again.
 let hasOpenedPane = false
+// Nudge mode's resume, waiting for the person's /clear: the watch as it stood
+// when it reached ready. Kept in module memory because a /clear wipes the
+// plugin's stored values but not this. Cleared when the resume is sent, and
+// by /hr-off or a fresh arm, so a person who turns the watch off gets none.
+let pendingResume: Hr | undefined
+// When the session began, as the poll last read it. A /clear starts the
+// session over, so a change here while a resume is pending is the person's clear.
+let lastStartedAt: number | undefined
 
 // Opens the Agents pane, without focus, the first time the roster has a row.
 // The engine's own list of open panes outlives a module reload, so a pane
@@ -321,6 +329,8 @@ async function armWatch(
     }
     return stored
   })
+  // Arming again from ready means the person chose to go on without a clear.
+  pendingResume = undefined
   if (mode === 'auto' && !CLEAR_ENABLED) return AUTO_DISABLED_TEXT
   return armedText(path, stored ?? { runFolder: path, phase: 'armed', mode: wanted, threshold: HR_THRESHOLD })
 }
@@ -328,6 +338,7 @@ async function armWatch(
 // Turns the watch off and forgets its run.
 async function disarmWatch($: Dollar): Promise<string> {
   if (isClearing) isOffDuringClear = true
+  pendingResume = undefined
   await update($, hr, (cur: Hr) => ({
     runFolder: '',
     phase: 'off',
@@ -588,6 +599,25 @@ export const register: Register = on => {
       })
     }
 
+    // Nudge mode, after the person's /clear: the same resume prompt auto mode
+    // sends, as the first prompt of the new context, and the watch re-armed
+    // with what it had before the clear. The pending value is taken before
+    // anything is awaited, so a second poll cannot send it again. The watch is
+    // written first and the prompt is not awaited, for the same reason the
+    // nudge is not: the submit runs a turn of its own once the session is idle.
+    const resumeAfterClear = async () => {
+      const state = pendingResume
+      pendingResume = undefined
+      if (state === undefined) return
+      const after: Hr = { ...state, phase: 'armed', waitsForDrop: true, nudgedAt: undefined }
+      // The clear wiped the store, so it reads as never armed. If the successor
+      // already armed it through hr_watch, keep what it set.
+      await update($, hr, (cur: Hr) => (isFresh(cur) || cur.phase === 'ready' ? after : cur))
+      void $.prompt.submit({ text: resumeText(state.handoffPath ?? '', state) }).catch((error: unknown) => {
+        $.ui.toast(`HR: the resume prompt failed: ${error instanceof Error ? error.message : String(error)}`)
+      })
+    }
+
     // Poll the engine's agent list: it is the only source of each agent's
     // status (running, idle, done). Write only on a change, so an idle
     // session does not redraw every second.
@@ -613,7 +643,11 @@ export const register: Register = on => {
       })()
       // Separate from the list refresh, so a failed usage read never stops it.
       void (async () => {
-        const { context } = await $.session.usage()
+        const { context, startedAt } = await $.session.usage()
+        // A new start time with a resume pending: the person ran /clear.
+        const isNewSession = lastStartedAt !== undefined && startedAt !== lastStartedAt
+        lastStartedAt = startedAt
+        if (isNewSession && pendingResume !== undefined) await resumeAfterClear()
         // `percent` is tokens over window: the share of the window USED, not left.
         const reading: Gauge = { percent: context.percent, window: context.window, tokens: context.tokens }
         const last = await read($, gauge)
@@ -809,7 +843,16 @@ export const register: Register = on => {
             { list: path => $.fs.list(path), toast: text => $.ui.toast(text) },
             CLEAR_ENABLED,
           )
-          if (seen !== state) await update($, hr, (cur: Hr) => (cur.phase === 'nudged' ? seen : cur))
+          let isStored = false
+          if (seen !== state) {
+            await update($, hr, (cur: Hr) => {
+              isStored = cur.phase === 'nudged'
+              return isStored ? seen : cur
+            })
+          }
+          // Nudge mode: keep the resume where a /clear cannot wipe it, for the
+          // poll to send once the person has cleared.
+          if (isStored && seen.phase === 'ready') pendingResume = seen
         }
       } catch {
         // The watch stays nudged; the next main turn's end looks again.
