@@ -35,7 +35,8 @@ export type Gauge = {
   tokens?: number
 }
 
-// The context watch. `off` until /hr-watch arms it on a run folder; `armed`
+// The context watch. `off` until /hr-watch arms it on a run folder (the one
+// given, else .runs/hr under the session's project root); `armed`
 // waits for the gauge to reach the threshold; `nudged` has asked the main loop
 // for a handoff and waits for the file. Then, in nudge mode, `ready`: the
 // handoff exists and the owner runs /clear; in auto mode, `clearing` runs
