@@ -245,6 +245,8 @@ function hrEngine(on: Parameters<Parameters<typeof test>[1]>[1]) {
     commands: [] as string[],
     toasts: [] as string[],
     tools: [] as { name: string; description: string; inputSchema: Record<string, unknown> }[],
+    // What the engine does beyond recording a command the plugin runs.
+    onCommand: undefined as ((command: string) => unknown) | undefined,
   }
   on('agent.list', () => ({ value: [] }))
   on('session.usage', () => usage(world.percent))
@@ -266,8 +268,9 @@ function hrEngine(on: Parameters<Parameters<typeof test>[1]>[1]) {
     world.submits.push(e.text)
     return { text: e.text }
   })
-  on('command.run', (_, e) => {
+  on('command.run', async (_, e) => {
     world.commands.push(e.command)
+    await world.onCommand?.(e.command)
     return { text: '' }
   })
   on('turn.complete', () => ({ text: '' }))
@@ -295,7 +298,7 @@ test('/hr-watch on a missing folder stays off', async ($, on) => {
   expect(await header($)).not.toContain('HR')
 })
 
-test('/hr-watch with a mode word: nudge arms in nudge, auto is refused while /clear is disabled', async ($, on) => {
+test('/hr-watch with a mode word: nudge arms in nudge, auto arms in auto', async ($, on) => {
   const { clock } = hrEngine(on)
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
 
@@ -305,9 +308,9 @@ test('/hr-watch with a mode word: nudge arms in nudge, auto is refused while /cl
 
   await $.command.run({ command: 'hr-off', args: '' })
   const auto = await $.command.run({ command: 'hr-watch', args: `${RUN} auto` })
-  expect(auto.text).toBe('auto mode is not enabled in this build yet; armed in nudge mode')
+  expect(auto.text).toBe(`HR armed on ${RUN} (auto)`)
   await clock.advance(1500)
-  expect(await header($)).toContain('HR nudge ·')
+  expect(await header($)).toContain('HR auto ·')
 })
 
 test('the model arms and disarms the watch through the hr_watch and hr_off tools', async ($, on) => {
@@ -335,9 +338,11 @@ test('the model arms and disarms the watch through the hr_watch and hr_off tools
   await clock.advance(1500)
   expect(await header($)).toContain('ctx used 10% · HR nudge · 0 running')
 
-  // Auto while /clear is disabled: the command's reply, armed in nudge.
+  // Auto: re-arms in auto mode.
   const auto = await $.tool.call({ tool: 'mcp__agent-sidebar__hr_watch', runFolder: RUN, mode: 'auto' } as never)
-  expect(auto.result).toBe('auto mode is not enabled in this build yet; armed in nudge mode')
+  expect(auto.result).toBe(`HR armed on ${RUN} (auto)`)
+  await clock.advance(1500)
+  expect(await header($)).toContain('ctx used 10% · HR auto · 0 running')
 
   const off = await $.tool.call({ tool: 'mcp__agent-sidebar__hr_off' } as never)
   expect(off.result).toBe('HR off')
@@ -464,6 +469,99 @@ test('in auto mode with /clear enabled, a seen handoff clears and then hands the
   expect(after.phase).toBe('armed')
   expect(failed).toEqual([])
   expect(toasts.some(t => t.includes('no clear here'))).toBe(true)
+})
+
+// Stands in for the engine's value store, so a test can do what a live /clear
+// does to the plugin: forget every value it stored.
+function stateStore(on: Parameters<Parameters<typeof test>[1]>[1]) {
+  const values = new Map<string, unknown>()
+  const versions = new Map<string, number>()
+  const keyOf = (e: { plugin: string; key: string; id?: string }) => `${e.plugin}/${e.key}/${e.id ?? ''}`
+  on('state.get', (_, e) => {
+    const k = keyOf(e as never)
+    return { value: { value: values.get(k), version: versions.get(k) ?? 0 } }
+  })
+  on('state.set', (_, e) => {
+    const w = e as unknown as { plugin: string; key: string; id?: string; value: unknown; ifVersion?: number }
+    const k = keyOf(w)
+    const at = versions.get(k) ?? 0
+    if (w.ifVersion !== undefined && w.ifVersion !== at) return { value: { isSet: false, version: at } }
+    values.set(k, w.value)
+    versions.set(k, at + 1)
+    return { value: { isSet: true, version: at + 1 } }
+  })
+  return {
+    forget(plugin: string) {
+      for (const k of [...values.keys()]) {
+        if (!k.startsWith(`${plugin}/`)) continue
+        values.delete(k)
+        versions.set(k, (versions.get(k) ?? 0) + 1)
+      }
+    },
+  }
+}
+
+test('in auto mode the watch clears, resumes and re-arms, though the clear wipes what the plugin stored', async ($, on) => {
+  const store = stateStore(on)
+  const { clock, world } = hrEngine(on)
+  // A live /clear leaves the plugin's stored values at their defaults.
+  world.onCommand = command => {
+    if (command === 'clear') store.forget('agent-sidebar')
+  }
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+
+  expect((await $.command.run({ command: 'hr-watch', args: `${RUN} auto` })).text).toBe(`HR armed on ${RUN} (auto)`)
+  await clock.advance(1500)
+  expect(await header($)).toContain('HR auto ·')
+
+  world.percent = 55
+  await clock.advance(1500)
+  expect(world.submits).toEqual([NUDGE_55])
+
+  world.handoffs = [{ name: 'orchestrator-handoff-1.md', kind: 'file', size: 1, mtimeMs: clock.now(), isLink: false }]
+  await $.turn.complete(mainTurnEnds)
+  await clock.advance(3000)
+
+  expect(world.commands.filter(c => c === 'clear')).toEqual(['clear'])
+  expect(world.submits.length).toBe(2)
+  expect(world.submits[1]).toContain('[HR] Successor start.')
+  expect(world.submits[1]).toContain(`${RUN}\\handoffs\\orchestrator-handoff-1.md`)
+  expect(world.submits[1]).toContain(`runFolder ${RUN} and mode auto`)
+  // Re-armed in auto mode on the same run, from what was captured before the clear.
+  expect(await header($)).toContain('HR auto ·')
+
+  // Still over the threshold: no new nudge until the gauge has dropped and climbed back.
+  world.percent = 56
+  await clock.advance(3000)
+  expect(world.submits.length).toBe(2)
+  world.percent = 30
+  await clock.advance(1500)
+  world.percent = 60
+  await clock.advance(1500)
+  expect(world.submits.length).toBe(3)
+  expect(world.submits[2]).toContain('[HR] Context used 60%.')
+})
+
+test('/hr-off during a clear keeps the watch off afterwards', async ($, on) => {
+  const store = stateStore(on)
+  const { clock, world } = hrEngine(on)
+  world.onCommand = async command => {
+    if (command !== 'clear') return
+    store.forget('agent-sidebar')
+    // The owner turns the watch off while the clear is in flight.
+    await $.command.run({ command: 'hr-off', args: '' })
+  }
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+
+  await $.command.run({ command: 'hr-watch', args: `${RUN} auto` })
+  world.percent = 55
+  await clock.advance(1500)
+  world.handoffs = [{ name: 'h.md', kind: 'file', size: 1, mtimeMs: clock.now(), isLink: false }]
+  await $.turn.complete(mainTurnEnds)
+  await clock.advance(3000)
+
+  expect(world.commands.filter(c => c === 'clear')).toEqual(['clear'])
+  expect(await header($)).not.toContain('HR')
 })
 
 test('a second session start, as /clear may raise, leaves one poll running, not two', async ($, on) => {

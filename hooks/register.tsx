@@ -15,9 +15,13 @@ const SILENT_MS = 10 * 60_000
 
 // The context watch: at this share of the main window used, ask for a handoff.
 const HR_THRESHOLD = 50
-// Stays false until the /clear survival test passes. While false, auto mode is
-// refused and the watch arms in nudge mode, so nothing clears the conversation.
-const CLEAR_ENABLED = false
+// On since the /clear survival test passed live on 2026-11-03. After a /clear,
+// a named background agent survives, still receives messages and replies.
+// A session cron survives. The agent's row in the roster survives.
+// This plugin's own stored values do not survive: they read as their defaults,
+// so the watch re-arms from what it captured before the clear.
+// Set it to false to refuse auto mode and arm in nudge mode instead.
+const CLEAR_ENABLED = true
 const AUTO_DISABLED_TEXT = 'auto mode is not enabled in this build yet; armed in nudge mode'
 const HR_WATCH = 'hr-watch'
 const HR_OFF = 'hr-off'
@@ -121,6 +125,16 @@ type Map = Record<string, AgentRow>
 // mid-clear must neither start a second poll nor a second clear.
 let poll: Timer | undefined
 let isClearing = false
+// Set when /hr-off or the hr_off tool runs while a clear is in flight, so the
+// end of that clear does not re-arm a watch the owner turned off.
+let isOffDuringClear = false
+
+// Whether the stored watch reads as never armed, which is how it reads once a
+// /clear has wiped the plugin's values. /hr-off leaves the same shape behind,
+// which is why the clear also checks isOffDuringClear.
+function isFresh(state: Hr): boolean {
+  return state.phase === 'off' && state.runFolder === ''
+}
 
 // Splits /hr-watch's arguments into the run folder and an optional last word
 // naming the mode. The folder may hold spaces, so only a last word of nudge or
@@ -157,11 +171,12 @@ async function armWatch($: Dollar, runFolder: string, mode: string | undefined):
     }
   })
   if (mode === 'auto' && !CLEAR_ENABLED) return AUTO_DISABLED_TEXT
-  return wanted === 'auto' ? `HR armed on ${path} in auto mode` : `HR armed on ${path}`
+  return wanted === 'auto' ? `HR armed on ${path} (auto)` : `HR armed on ${path}`
 }
 
 // Turns the watch off and forgets its run.
 async function disarmWatch($: Dollar): Promise<string> {
+  if (isClearing) isOffDuringClear = true
   await update($, hr, (cur: Hr) => ({
     runFolder: '',
     phase: 'off',
@@ -426,13 +441,21 @@ export const register: Register = on => {
         const state = await read($, hr)
         if (state.phase !== 'clearing') return
         isClearing = true
+        isOffDuringClear = false
         try {
+          // `state` was read before the clear; finishClear takes the handoff,
+          // run folder, mode and threshold from it, never from the store.
           const after = await finishClear(state, {
             clear: () => $.command.run({ command: 'clear' }),
             submit: text => $.prompt.submit({ text }),
             toast: text => $.ui.toast(text),
           })
-          await update($, hr, (cur: Hr) => (cur.phase === 'clearing' ? after : cur))
+          // The clear wiped the store, so the watch reads as never armed: re-arm
+          // it unless the owner turned it off meanwhile. If the successor armed
+          // it first through hr_watch, keep what it set.
+          await update($, hr, (cur: Hr) =>
+            cur.phase === 'clearing' || (isFresh(cur) && !isOffDuringClear) ? after : cur,
+          )
         } finally {
           isClearing = false
         }
