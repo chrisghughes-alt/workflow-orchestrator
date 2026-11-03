@@ -136,42 +136,78 @@ function isFresh(state: Hr): boolean {
   return state.phase === 'off' && state.runFolder === ''
 }
 
-// Splits /hr-watch's arguments into the run folder and an optional last word
-// naming the mode. The folder may hold spaces, so only a last word of nudge or
-// auto is taken as the mode.
-function watchArgs(args: string): { runFolder: string; mode?: string } {
+// Splits /hr-watch's arguments into the run folder, an optional mode word and
+// an optional threshold word after the mode. The folder may hold spaces, so a
+// word is taken as the mode only when it is nudge or auto, and as the
+// threshold only when it follows the mode. A threshold word that is not a
+// whole number becomes NaN, which armWatch refuses.
+function watchArgs(args: string): { runFolder: string; mode?: string; threshold?: number } {
   const text = args.trim()
-  const found = /^(.*\S)\s+(nudge|auto)$/i.exec(text)
-  return found ? { runFolder: found[1]!, mode: found[2]!.toLowerCase() } : { runFolder: text }
+  const found = /^(.*\S)\s+(nudge|auto)(?:\s+(\S+))?$/i.exec(text)
+  if (!found) return { runFolder: text }
+  const word = found[3]
+  return {
+    runFolder: found[1]!,
+    mode: found[2]!.toLowerCase(),
+    ...(word === undefined ? {} : { threshold: /^[+-]?\d+$/.test(word) ? Number(word) : Number.NaN }),
+  }
+}
+
+// A threshold the watch accepts: a whole percent from 1 to 100.
+function isThreshold(value: unknown): value is number {
+  return typeof value === 'number' && Number.isInteger(value) && value >= 1 && value <= 100
+}
+
+// "HR armed on <folder>", then the mode when auto and the threshold when not
+// the default: "(auto)", "(5%)" or "(auto, 5%)".
+function armedText(path: string, state: Hr): string {
+  const parts: string[] = []
+  if (modeOf(state) === 'auto') parts.push('auto')
+  if (state.threshold !== HR_THRESHOLD) parts.push(`${state.threshold}%`)
+  return parts.length === 0 ? `HR armed on ${path}` : `HR armed on ${path} (${parts.join(', ')})`
 }
 
 // Arms the context watch on a run folder that exists, in nudge mode unless
-// auto is asked for and /clear is enabled. Arming it again on the same folder
-// in the same mode leaves it where it is (armed, or mid-nudge); from ready it
-// re-arms. Returns the reply shown to whoever asked.
-async function armWatch($: Dollar, runFolder: string, mode: string | undefined): Promise<string> {
+// auto is asked for and /clear is enabled, at the given threshold or the
+// default. Arming it again on the same folder, mode and threshold (or none
+// given) leaves it where it is (armed, or mid-nudge); from ready it re-arms.
+// Returns the reply shown to whoever asked.
+async function armWatch(
+  $: Dollar,
+  runFolder: string,
+  mode: string | undefined,
+  threshold?: unknown,
+): Promise<string> {
   const path = runFolder.trim()
-  if (path === '') return 'HR: give the run folder: /hr-watch <absolute path> [nudge|auto]. The watch stays off.'
+  if (path === '')
+    return 'HR: give the run folder: /hr-watch <absolute path> [nudge|auto] [threshold]. The watch stays off.'
   if (mode !== undefined && mode !== 'nudge' && mode !== 'auto')
     return `HR: unknown mode ${mode}; use nudge or auto. The watch is unchanged.`
+  if (threshold !== undefined && !isThreshold(threshold)) return 'HR: threshold must be a whole number from 1 to 100'
   const exists = await $.fs.exists(path).catch(() => false)
   if (!exists) return `HR: no folder at ${path}. The watch stays off.`
   const wanted: HrMode = mode === 'auto' && CLEAR_ENABLED ? 'auto' : 'nudge'
+  let stored: Hr | undefined
   await update($, hr, (cur: Hr) => {
     const isWatching = cur.phase === 'armed' || cur.phase === 'nudged' || cur.phase === 'clearing'
-    if (isWatching && cur.runFolder === path && modeOf(cur) === wanted) return cur
-    return {
+    const isSameThreshold = threshold === undefined || threshold === cur.threshold
+    if (isWatching && cur.runFolder === path && modeOf(cur) === wanted && isSameThreshold) {
+      stored = cur
+      return cur
+    }
+    stored = {
       runFolder: path,
       phase: 'armed',
       mode: wanted,
-      threshold: cur.threshold || HR_THRESHOLD,
+      threshold: isThreshold(threshold) ? threshold : HR_THRESHOLD,
       // Re-armed from ready the context is likely still over the threshold:
       // wait for it to drop before asking for another handoff.
       ...(cur.phase === 'ready' ? { waitsForDrop: true } : {}),
     }
+    return stored
   })
   if (mode === 'auto' && !CLEAR_ENABLED) return AUTO_DISABLED_TEXT
-  return wanted === 'auto' ? `HR armed on ${path} (auto)` : `HR armed on ${path}`
+  return armedText(path, stored ?? { runFolder: path, phase: 'armed', mode: wanted, threshold: HR_THRESHOLD })
 }
 
 // Turns the watch off and forgets its run.
@@ -336,7 +372,7 @@ export const register: Register = on => {
       .register({
         name: HR_WATCH,
         description: 'Arm the context watch: nudge a handoff at the threshold, then clear and resume',
-        argumentHint: '<run-folder>',
+        argumentHint: '<run-folder> [nudge|auto] [threshold]',
       })
       .catch(() => undefined)
     await $.command.register({ name: HR_OFF, description: 'Disarm the context watch' }).catch(() => undefined)
@@ -355,10 +391,14 @@ export const register: Register = on => {
       .register({
         name: 'hr_watch',
         description:
-          'Arm the context watch for this session: nudge for a handoff at 50% context used, then (mode auto) clear and resume, or (mode nudge, the default) wait for the owner. Pass the absolute run folder.',
+          'Arm the context watch for this session: nudge for a handoff at the threshold (percent of context used, 1 to 100, default 50), then (mode auto) clear and resume, or (mode nudge, the default) wait for the owner. Pass the absolute run folder.',
         inputSchema: {
           type: 'object',
-          properties: { runFolder: { type: 'string' }, mode: { type: 'string', enum: ['nudge', 'auto'] } },
+          properties: {
+            runFolder: { type: 'string' },
+            mode: { type: 'string', enum: ['nudge', 'auto'] },
+            threshold: { type: 'integer', minimum: 1, maximum: 100 },
+          },
           required: ['runFolder'],
         },
       })
@@ -474,8 +514,8 @@ export const register: Register = on => {
   // Arms the context watch on a run folder that exists. Arming it again on the
   // same folder leaves it where it is (armed, or mid-nudge).
   on('command.run', { command: HR_WATCH }, async ($, e) => {
-    const { runFolder, mode } = watchArgs(e.args)
-    return { text: await armWatch($, runFolder, mode) }
+    const { runFolder, mode, threshold } = watchArgs(e.args)
+    return { text: await armWatch($, runFolder, mode, threshold) }
   }).catch(() => ({ text: 'HR: the watch could not be armed.' }))
 
   on('command.run', { command: HR_OFF }, async $ => ({ text: await disarmWatch($) })).catch(() => ({
@@ -485,10 +525,11 @@ export const register: Register = on => {
   // The same two functions as the commands above, for the model: the reply
   // text comes back as the tool's result.
   on('tool.call', { tool: 'mcp__agent-sidebar__hr_watch' }, async ($, e) => {
-    const input = e as unknown as { runFolder?: unknown; mode?: unknown }
+    const input = e as unknown as { runFolder?: unknown; mode?: unknown; threshold?: unknown }
     const runFolder = typeof input.runFolder === 'string' ? input.runFolder : ''
     const mode = typeof input.mode === 'string' ? input.mode : undefined
-    return { result: await armWatch($, runFolder, mode) }
+    // Passed through as given, so a value of the wrong type is refused, not dropped.
+    return { result: await armWatch($, runFolder, mode, input.threshold) }
   }).catch(() => ({ deny: 'HR: the watch could not be armed.' }))
 
   on('tool.call', { tool: 'mcp__agent-sidebar__hr_off' }, async $ => ({

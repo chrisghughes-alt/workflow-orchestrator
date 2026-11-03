@@ -321,7 +321,11 @@ test('the model arms and disarms the watch through the hr_watch and hr_off tools
   expect(Object.keys(byName).sort()).toEqual(['agents', 'hr_off', 'hr_watch'])
   expect(byName.hr_watch!.inputSchema).toEqual({
     type: 'object',
-    properties: { runFolder: { type: 'string' }, mode: { type: 'string', enum: ['nudge', 'auto'] } },
+    properties: {
+      runFolder: { type: 'string' },
+      mode: { type: 'string', enum: ['nudge', 'auto'] },
+      threshold: { type: 'integer', minimum: 1, maximum: 100 },
+    },
     required: ['runFolder'],
   })
   expect(byName.hr_off!.inputSchema).toEqual({ type: 'object', properties: {} })
@@ -348,6 +352,69 @@ test('the model arms and disarms the watch through the hr_watch and hr_off tools
   expect(off.result).toBe('HR off')
   await clock.advance(1500)
   expect(await header($)).not.toContain('HR')
+})
+
+const THRESHOLD_REFUSED = 'HR: threshold must be a whole number from 1 to 100'
+
+test('hr_watch takes a threshold: at 5 a 6% reading nudges, and a bad one is refused', async ($, on) => {
+  const { clock, world } = hrEngine(on)
+  // Below the threshold to be set, so the first poll after arming stays quiet.
+  world.percent = 2
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+
+  const armed = await $.tool.call({ tool: 'mcp__agent-sidebar__hr_watch', runFolder: RUN, threshold: 5 } as never)
+  expect(armed.result).toBe(`HR armed on ${RUN} (5%)`)
+  await clock.advance(1500)
+  expect(await header($)).toContain('ctx used 2% · HR nudge · 0 running')
+  expect(world.submits).toEqual([])
+
+  // Refused, and the watch keeps threshold 5.
+  for (const threshold of [101, 0, 5.5, '7']) {
+    const r = await $.tool.call({ tool: 'mcp__agent-sidebar__hr_watch', runFolder: RUN, threshold } as never)
+    expect(r.result).toBe(THRESHOLD_REFUSED)
+  }
+  await clock.advance(1500)
+  expect(await header($)).toContain('HR nudge ·')
+  expect(world.submits).toEqual([])
+
+  world.percent = 6
+  await clock.advance(1500)
+  expect(world.submits.length).toBe(1)
+  expect(world.submits[0]).toContain('[HR] Context used 6%.')
+
+  // The default threshold, given or not, adds nothing to the reply.
+  await $.tool.call({ tool: 'mcp__agent-sidebar__hr_off' } as never)
+  const plain = await $.tool.call({ tool: 'mcp__agent-sidebar__hr_watch', runFolder: RUN, mode: 'auto', threshold: 50 } as never)
+  expect(plain.result).toBe(`HR armed on ${RUN} (auto)`)
+})
+
+test('/hr-watch reads a threshold as the word after the mode', async ($, on) => {
+  const { clock, world } = hrEngine(on)
+  world.percent = 2
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+
+  expect((await $.command.run({ command: 'hr-watch', args: `${RUN} auto 5` })).text).toBe(`HR armed on ${RUN} (auto, 5%)`)
+  // Arming again the same way changes nothing and says so the same way.
+  expect((await $.command.run({ command: 'hr-watch', args: `${RUN} auto 5` })).text).toBe(`HR armed on ${RUN} (auto, 5%)`)
+  await clock.advance(1500)
+  expect(await header($)).toContain('HR auto ·')
+
+  for (const word of ['abc', '0', '101', '5.5']) {
+    expect((await $.command.run({ command: 'hr-watch', args: `${RUN} nudge ${word}` })).text).toBe(THRESHOLD_REFUSED)
+  }
+  await clock.advance(1500)
+  expect(await header($)).toContain('HR auto ·')
+
+  world.percent = 6
+  await clock.advance(1500)
+  expect(world.submits.length).toBe(1)
+  expect(world.submits[0]).toContain('[HR] Context used 6%.')
+
+  // Off, then armed with no threshold: back to the default.
+  await $.command.run({ command: 'hr-off', args: '' })
+  expect((await $.command.run({ command: 'hr-watch', args: `${RUN} nudge 5` })).text).toBe(`HR armed on ${RUN} (5%)`)
+  await $.command.run({ command: 'hr-off', args: '' })
+  expect((await $.command.run({ command: 'hr-watch', args: RUN })).text).toBe(`HR armed on ${RUN}`)
 })
 
 test('the watch nudges once at the threshold, then waits for a new handoff file', async ($, on) => {
