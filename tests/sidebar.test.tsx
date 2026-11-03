@@ -447,8 +447,9 @@ test('in auto mode with /clear enabled, a seen handoff clears and then hands the
   expect(calls).toEqual([
     'clear',
     `[HR] Successor start. Read ${RUN}\\handoffs\\newer.md, ${RUN}\\orchestrator-state.md and ` +
-      'C:\\Code-Repos\\Equipment Check\\docs\\Native-Agent-Workflow.md in full, re-arm the heartbeat cron, ' +
-      `run /hr-watch ${RUN}, then continue from the handoff's next three actions.`,
+      'C:\\Code-Repos\\Equipment Check\\docs\\Native-Agent-Workflow.md in full, check CronList and re-create the ' +
+      '30-minute heartbeat cron only if it is gone, call the mcp__agent-sidebar__hr_watch tool with runFolder ' +
+      `${RUN} and mode auto, then continue from the handoff's next three actions.`,
   ])
 
   // A failed clear: toast it, re-arm, and send no resume.

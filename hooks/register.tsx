@@ -52,10 +52,14 @@ function nudgeText(percent: number, runFolder: string): string {
   )
 }
 
-function resumeText(handoffPath: string, runFolder: string): string {
+// The successor arms the watch through the tool, since a model cannot run a
+// slash command, and in the mode the watch was armed in.
+function resumeText(handoffPath: string, runFolder: string, mode: HrMode): string {
   return (
     `[HR] Successor start. Read ${handoffPath}, ${runFolder}\\orchestrator-state.md and ${WORKFLOW_DOC} in full, ` +
-    `re-arm the heartbeat cron, run /hr-watch ${runFolder}, then continue from the handoff's next three actions.`
+    'check CronList and re-create the 30-minute heartbeat cron only if it is gone, call the ' +
+    `mcp__agent-sidebar__hr_watch tool with runFolder ${runFolder} and mode ${mode}, ` +
+    "then continue from the handoff's next three actions."
   )
 }
 
@@ -102,7 +106,7 @@ type ClearIo = {
 export async function finishClear(state: Hr, io: ClearIo): Promise<Hr> {
   try {
     await io.clear()
-    await io.submit(resumeText(state.handoffPath ?? '', state.runFolder))
+    await io.submit(resumeText(state.handoffPath ?? '', state.runFolder, modeOf(state)))
   } catch (error) {
     io.toast(`HR: clear and resume failed: ${error instanceof Error ? error.message : String(error)}`)
   }
