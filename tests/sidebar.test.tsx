@@ -232,6 +232,14 @@ const NUDGE_55 =
   '(use the clock for the stamp), bring the Run tracker section of the run\'s plan document up to date and commit it ' +
   `on main as a docs-only commit, update ${RUN}\\orchestrator-state.md, then end your turn.`
 
+// A workflow document whose path holds a space, as a Windows path often does.
+const DOC = 'C:\\Docs\\My Workflow.md'
+const RESUME_WITH_DOC = (handoff: string, threshold: number) =>
+  `[HR] Successor start. Read ${RUN}\\handoffs\\${handoff}, ${RUN}\\orchestrator-state.md and ${DOC} in full, ` +
+  'check CronList and re-create the heartbeat cron only if it is gone, call the ' +
+  `mcp__workflow-orchestrator__hr_watch tool with runFolder ${RUN}, mode auto, threshold ${threshold} and ` +
+  `workflowDoc ${DOC}, then continue from the handoff's next three actions.`
+
 type Fs = { name: string; kind: 'file' | 'dir' | 'other'; size: number; mtimeMs: number; isLink: boolean }
 
 // Stands in for the engine under the context watch: a run folder that exists,
@@ -325,6 +333,7 @@ test('the model arms and disarms the watch through the hr_watch and hr_off tools
       runFolder: { type: 'string' },
       mode: { type: 'string', enum: ['nudge', 'auto'] },
       threshold: { type: 'integer', minimum: 1, maximum: 100 },
+      workflowDoc: { type: 'string' },
     },
     required: ['runFolder'],
   })
@@ -415,6 +424,69 @@ test('/hr-watch reads a threshold as the word after the mode', async ($, on) => 
   expect((await $.command.run({ command: 'hr-watch', args: `${RUN} nudge 5` })).text).toBe(`HR armed on ${RUN} (5%)`)
   await $.command.run({ command: 'hr-off', args: '' })
   expect((await $.command.run({ command: 'hr-watch', args: RUN })).text).toBe(`HR armed on ${RUN}`)
+})
+
+test('hr_watch keeps a workflowDoc and the resume prompt hands it to the successor', async ($, on) => {
+  const { clock, world } = hrEngine(on)
+  world.percent = 2
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+
+  const armed = await $.tool.call({
+    tool: 'mcp__workflow-orchestrator__hr_watch',
+    runFolder: RUN,
+    mode: 'auto',
+    threshold: 5,
+    workflowDoc: DOC,
+  } as never)
+  expect(armed.result).toBe(`HR armed on ${RUN} (auto, 5%, doc ${DOC})`)
+  // A doc that is not a string is refused, and the watch keeps what it has.
+  const bad = await $.tool.call({ tool: 'mcp__workflow-orchestrator__hr_watch', runFolder: RUN, workflowDoc: 7 } as never)
+  expect(bad.result).toBe('HR: workflowDoc must be a path')
+
+  world.percent = 6
+  await clock.advance(1500)
+  expect(world.submits.length).toBe(1)
+  world.handoffs = [{ name: 'h.md', kind: 'file', size: 1, mtimeMs: clock.now(), isLink: false }]
+  await $.turn.complete(mainTurnEnds)
+  await clock.advance(3000)
+
+  expect(world.commands.filter(c => c === 'clear')).toEqual(['clear'])
+  expect(world.submits[1]).toBe(RESUME_WITH_DOC('h.md', 5))
+})
+
+test('/hr-watch reads key=value options, a doc path with spaces last, and refuses an unknown key', async ($, on) => {
+  const { clock, world } = hrEngine(on)
+  world.percent = 2
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+
+  const run = (args: string) => $.command.run({ command: 'hr-watch', args }).then(r => r.text)
+
+  expect(await run(`${RUN} mode=auto threshold=5 doc=${DOC}`)).toBe(`HR armed on ${RUN} (auto, 5%, doc ${DOC})`)
+  await $.command.run({ command: 'hr-off', args: '' })
+  // The bare mode word and the bare threshold after it still work beside a doc.
+  expect(await run(`${RUN} auto 5 doc=${DOC}`)).toBe(`HR armed on ${RUN} (auto, 5%, doc ${DOC})`)
+  await $.command.run({ command: 'hr-off', args: '' })
+  // A doc with no space may come before the other options.
+  expect(await run(`${RUN} doc=C:\\Docs\\flow.md mode=nudge threshold=7`)).toBe(
+    `HR armed on ${RUN} (7%, doc C:\\Docs\\flow.md)`,
+  )
+  expect(await run(`${RUN} nudge threshold=abc`)).toBe(THRESHOLD_REFUSED)
+  expect(await run(`${RUN} mode=sideways`)).toBe('HR: unknown mode sideways; use nudge or auto. The watch is unchanged.')
+
+  // An unknown key is refused before anything else, and the watch is unchanged.
+  expect(await run(`${RUN} auto colour=red`)).toBe('HR: unknown option colour')
+  await clock.advance(1500)
+  expect(await header($)).toContain('HR nudge ·')
+
+  // The doc travels to the resume prompt.
+  await $.command.run({ command: 'hr-off', args: '' })
+  expect(await run(`${RUN} auto 5 doc=${DOC}`)).toBe(`HR armed on ${RUN} (auto, 5%, doc ${DOC})`)
+  world.percent = 6
+  await clock.advance(1500)
+  world.handoffs = [{ name: 'h.md', kind: 'file', size: 1, mtimeMs: clock.now(), isLink: false }]
+  await $.turn.complete(mainTurnEnds)
+  await clock.advance(3000)
+  expect(world.submits[1]).toBe(RESUME_WITH_DOC('h.md', 5))
 })
 
 test('the watch nudges once at the threshold, then waits for a new handoff file', async ($, on) => {
@@ -516,13 +588,22 @@ test('in auto mode with /clear enabled, a seen handoff clears and then hands the
   })
   expect(done.phase).toBe('armed')
   expect(done.waitsForDrop).toBe(true)
+  // No workflow document given: the resume points at the run-state file instead.
   expect(calls).toEqual([
     'clear',
     `[HR] Successor start. Read ${RUN}\\handoffs\\newer.md, ${RUN}\\orchestrator-state.md and ` +
-      'C:\\Code-Repos\\Equipment Check\\docs\\Native-Agent-Workflow.md in full, check CronList and re-create the ' +
-      '30-minute heartbeat cron only if it is gone, call the mcp__workflow-orchestrator__hr_watch tool with runFolder ' +
-      `${RUN} and mode auto, then continue from the handoff's next three actions.`,
+      "the run-state file's 'how to resume' section in full, check CronList and re-create the " +
+      'heartbeat cron only if it is gone, call the mcp__workflow-orchestrator__hr_watch tool with runFolder ' +
+      `${RUN}, mode auto, threshold 50, then continue from the handoff's next three actions.`,
   ])
+
+  // A workflow document given: the resume names it and hands it back to the tool.
+  const withDoc: string[] = []
+  await finishClear(
+    { ...seen, threshold: 5, workflowDoc: DOC },
+    { clear: async () => undefined, submit: async text => void withDoc.push(text), toast: t => void toasts.push(t) },
+  )
+  expect(withDoc).toEqual([RESUME_WITH_DOC('newer.md', 5)])
 
   // A failed clear: toast it, re-arm, and send no resume.
   const failed: string[] = []
@@ -593,7 +674,7 @@ test('in auto mode the watch clears, resumes and re-arms, though the clear wipes
   expect(world.submits.length).toBe(2)
   expect(world.submits[1]).toContain('[HR] Successor start.')
   expect(world.submits[1]).toContain(`${RUN}\\handoffs\\orchestrator-handoff-1.md`)
-  expect(world.submits[1]).toContain(`runFolder ${RUN} and mode auto`)
+  expect(world.submits[1]).toContain(`runFolder ${RUN}, mode auto, threshold 50, then`)
   // Re-armed in auto mode on the same run, from what was captured before the clear.
   expect(await header($)).toContain('HR auto ·')
 

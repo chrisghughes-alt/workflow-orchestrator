@@ -25,7 +25,6 @@ const CLEAR_ENABLED = true
 const AUTO_DISABLED_TEXT = 'auto mode is not enabled in this build yet; armed in nudge mode'
 const HR_WATCH = 'hr-watch'
 const HR_OFF = 'hr-off'
-const WORKFLOW_DOC = 'C:\\Code-Repos\\Equipment Check\\docs\\Native-Agent-Workflow.md'
 
 // Change the tag when AgentRow's fields change: a reload keeps what the old
 // code stored, and the tag makes the new code start fresh instead of misreading it.
@@ -36,12 +35,17 @@ const agents = atom({ plugin: 'workflow-orchestrator', key: 'agents' } as const,
 const now = atom({ plugin: 'workflow-orchestrator', key: 'now' } as const, 0)
 // The main conversation's context window. `percent` is the share USED, not left.
 const gauge = atom({ plugin: 'workflow-orchestrator', key: 'gauge' } as const, { window: 0 } as Gauge)
-const hr = atom({ plugin: 'workflow-orchestrator', key: 'hr' } as const, {
-  runFolder: '',
-  phase: 'off',
-  mode: 'nudge',
-  threshold: HR_THRESHOLD,
-} as Hr)
+// Tagged since the watch began to keep a workflow document.
+const hr = atom(
+  { plugin: 'workflow-orchestrator', key: 'hr' } as const,
+  {
+    runFolder: '',
+    phase: 'off',
+    mode: 'nudge',
+    threshold: HR_THRESHOLD,
+  } as Hr,
+  { shape: 'hr-2' },
+)
 
 // A value stored before modes existed has none: it was a nudge-only watch.
 function modeOf(state: Hr): HrMode {
@@ -57,13 +61,17 @@ function nudgeText(percent: number, runFolder: string): string {
 }
 
 // The successor arms the watch through the tool, since a model cannot run a
-// slash command, and in the mode the watch was armed in.
-function resumeText(handoffPath: string, runFolder: string, mode: HrMode): string {
+// slash command, with everything the watch was armed with. With no workflow
+// document given, the run-state file says how to resume instead.
+function resumeText(handoffPath: string, state: Hr): string {
+  const { runFolder, workflowDoc } = state
+  const reading = workflowDoc ?? "the run-state file's 'how to resume' section"
+  const docArg = workflowDoc === undefined ? '' : ` and workflowDoc ${workflowDoc}`
   return (
-    `[HR] Successor start. Read ${handoffPath}, ${runFolder}\\orchestrator-state.md and ${WORKFLOW_DOC} in full, ` +
-    'check CronList and re-create the 30-minute heartbeat cron only if it is gone, call the ' +
-    `mcp__workflow-orchestrator__hr_watch tool with runFolder ${runFolder} and mode ${mode}, ` +
-    "then continue from the handoff's next three actions."
+    `[HR] Successor start. Read ${handoffPath}, ${runFolder}\\orchestrator-state.md and ${reading} in full, ` +
+    'check CronList and re-create the heartbeat cron only if it is gone, call the ' +
+    `mcp__workflow-orchestrator__hr_watch tool with runFolder ${runFolder}, mode ${modeOf(state)}, ` +
+    `threshold ${state.threshold}${docArg}, then continue from the handoff's next three actions.`
   )
 }
 
@@ -110,7 +118,7 @@ type ClearIo = {
 export async function finishClear(state: Hr, io: ClearIo): Promise<Hr> {
   try {
     await io.clear()
-    await io.submit(resumeText(state.handoffPath ?? '', state.runFolder, modeOf(state)))
+    await io.submit(resumeText(state.handoffPath ?? '', state))
   } catch (error) {
     io.toast(`HR: clear and resume failed: ${error instanceof Error ? error.message : String(error)}`)
   }
@@ -150,21 +158,60 @@ function isFresh(state: Hr): boolean {
   return state.phase === 'off' && state.runFolder === ''
 }
 
-// Splits /hr-watch's arguments into the run folder, an optional mode word and
-// an optional threshold word after the mode. The folder may hold spaces, so a
-// word is taken as the mode only when it is nudge or auto, and as the
-// threshold only when it follows the mode. A threshold word that is not a
-// whole number becomes NaN, which armWatch refuses.
-function watchArgs(args: string): { runFolder: string; mode?: string; threshold?: number } {
+type WatchArgs = { runFolder: string; mode?: string; threshold?: number; workflowDoc?: string; unknown?: string }
+
+// A threshold word as a number; one that is not a whole number becomes NaN,
+// which armWatch refuses.
+function thresholdOf(word: string): number {
+  return /^[+-]?\d+$/.test(word) ? Number(word) : Number.NaN
+}
+
+// Splits /hr-watch's arguments into the run folder and its options, read from
+// the right: the bare word nudge or auto (the mode), a word right after the
+// mode word (the threshold), or key=value with key mode, threshold or doc.
+// The folder may hold spaces, so reading stops at the first word that is none
+// of these, and the rest is the folder. A doc path may hold spaces only as the
+// last option: doc= takes the rest of the line. The first word is always part
+// of the folder. A key not known is returned in `unknown`.
+function watchArgs(args: string): WatchArgs {
   const text = args.trim()
-  const found = /^(.*\S)\s+(nudge|auto)(?:\s+(\S+))?$/i.exec(text)
-  if (!found) return { runFolder: text }
-  const word = found[3]
-  return {
-    runFolder: found[1]!,
-    mode: found[2]!.toLowerCase(),
-    ...(word === undefined ? {} : { threshold: /^[+-]?\d+$/.test(word) ? Number(word) : Number.NaN }),
+  // Each word with where it starts, so the folder is cut from the text as typed.
+  const words = [...text.matchAll(/\S+/g)].map(m => ({ word: m[0], at: m.index }))
+  const out: WatchArgs = { runFolder: '' }
+  // The last option may be a doc whose path holds spaces: everything from the
+  // last doc= word to the end of the line.
+  const lastWord = words[words.length - 1]?.word ?? ''
+  if (!/^[^=]+=/.test(lastWord)) {
+    const at = words.findLastIndex((w, i) => i > 0 && /^doc=/i.test(w.word))
+    if (at > 0) {
+      out.workflowDoc = text.slice(words[at]!.at + 'doc='.length)
+      words.splice(at)
+    }
   }
+  const isModeWord = (word: string) => /^(nudge|auto)$/i.test(word)
+  while (words.length > 1) {
+    const word = words[words.length - 1]!.word
+    const option = /^([^=]+)=(.*)$/.exec(word)
+    if (option) {
+      const key = option[1]!.toLowerCase()
+      const value = option[2]!
+      if (key === 'mode') out.mode ??= value.toLowerCase()
+      else if (key === 'threshold') out.threshold ??= thresholdOf(value)
+      else if (key === 'doc') out.workflowDoc ??= value
+      else return { runFolder: '', unknown: option[1]! }
+    } else if (isModeWord(word)) {
+      out.mode ??= word.toLowerCase()
+    } else if (words.length > 2 && isModeWord(words[words.length - 2]!.word) && out.threshold === undefined) {
+      // The bare threshold form: the word right after the mode word.
+      out.threshold = thresholdOf(word)
+    } else {
+      break
+    }
+    words.pop()
+  }
+  const last = words[words.length - 1]
+  out.runFolder = last === undefined ? '' : text.slice(0, last.at + last.word.length)
+  return out
 }
 
 // A threshold the watch accepts: a whole percent from 1 to 100.
@@ -172,32 +219,39 @@ function isThreshold(value: unknown): value is number {
   return typeof value === 'number' && Number.isInteger(value) && value >= 1 && value <= 100
 }
 
-// "HR armed on <folder>", then the mode when auto and the threshold when not
-// the default: "(auto)", "(5%)" or "(auto, 5%)".
+// "HR armed on <folder>", then the mode when auto, the threshold when not the
+// default and the workflow document when given: "(auto)", "(5%)",
+// "(auto, 5%)" or "(auto, 5%, doc <path>)".
 function armedText(path: string, state: Hr): string {
   const parts: string[] = []
   if (modeOf(state) === 'auto') parts.push('auto')
   if (state.threshold !== HR_THRESHOLD) parts.push(`${state.threshold}%`)
+  if (state.workflowDoc !== undefined) parts.push(`doc ${state.workflowDoc}`)
   return parts.length === 0 ? `HR armed on ${path}` : `HR armed on ${path} (${parts.join(', ')})`
 }
 
 // Arms the context watch on a run folder that exists, in nudge mode unless
 // auto is asked for and /clear is enabled, at the given threshold or the
-// default. Arming it again on the same folder, mode and threshold (or none
-// given) leaves it where it is (armed, or mid-nudge); from ready it re-arms.
+// default, with the workflow document if one is given. Arming it again on the
+// same folder, mode, threshold and document (or none given) leaves it where it
+// is (armed, or mid-nudge); from ready it re-arms.
 // Returns the reply shown to whoever asked.
 async function armWatch(
   $: Dollar,
   runFolder: string,
   mode: string | undefined,
   threshold?: unknown,
+  workflowDoc?: unknown,
 ): Promise<string> {
   const path = runFolder.trim()
   if (path === '')
-    return 'HR: give the run folder: /hr-watch <absolute path> [nudge|auto] [threshold]. The watch stays off.'
+    return 'HR: give the run folder: /hr-watch <absolute path> [nudge|auto] [threshold] [mode=, threshold=, doc=]. The watch stays off.'
   if (mode !== undefined && mode !== 'nudge' && mode !== 'auto')
     return `HR: unknown mode ${mode}; use nudge or auto. The watch is unchanged.`
   if (threshold !== undefined && !isThreshold(threshold)) return 'HR: threshold must be a whole number from 1 to 100'
+  if (workflowDoc !== undefined && typeof workflowDoc !== 'string') return 'HR: workflowDoc must be a path'
+  // An empty doc reads as none given.
+  const doc = typeof workflowDoc === 'string' && workflowDoc.trim() !== '' ? workflowDoc.trim() : undefined
   const exists = await $.fs.exists(path).catch(() => false)
   if (!exists) return `HR: no folder at ${path}. The watch stays off.`
   const wanted: HrMode = mode === 'auto' && CLEAR_ENABLED ? 'auto' : 'nudge'
@@ -205,7 +259,8 @@ async function armWatch(
   await update($, hr, (cur: Hr) => {
     const isWatching = cur.phase === 'armed' || cur.phase === 'nudged' || cur.phase === 'clearing'
     const isSameThreshold = threshold === undefined || threshold === cur.threshold
-    if (isWatching && cur.runFolder === path && modeOf(cur) === wanted && isSameThreshold) {
+    const isSameDoc = doc === undefined || doc === cur.workflowDoc
+    if (isWatching && cur.runFolder === path && modeOf(cur) === wanted && isSameThreshold && isSameDoc) {
       stored = cur
       return cur
     }
@@ -214,6 +269,7 @@ async function armWatch(
       phase: 'armed',
       mode: wanted,
       threshold: isThreshold(threshold) ? threshold : HR_THRESHOLD,
+      ...(doc === undefined ? {} : { workflowDoc: doc }),
       // Re-armed from ready the context is likely still over the threshold:
       // wait for it to drop before asking for another handoff.
       ...(cur.phase === 'ready' ? { waitsForDrop: true } : {}),
@@ -386,7 +442,7 @@ export const register: Register = on => {
       .register({
         name: HR_WATCH,
         description: 'Arm the context watch: nudge a handoff at the threshold, then clear and resume',
-        argumentHint: '<run-folder> [nudge|auto] [threshold]',
+        argumentHint: '<run-folder> [nudge|auto] [threshold] [mode=…] [threshold=…] [doc=<workflow doc path>]',
       })
       .catch(() => undefined)
     await $.command.register({ name: HR_OFF, description: 'Disarm the context watch' }).catch(() => undefined)
@@ -406,13 +462,14 @@ export const register: Register = on => {
       .register({
         name: 'hr_watch',
         description:
-          'Arm the context watch for this session: nudge for a handoff at the threshold (percent of context used, 1 to 100, default 50), then (mode auto) clear and resume, or (mode nudge, the default) wait for the owner. Pass the absolute run folder.',
+          'Arm the context watch for this session: nudge for a handoff at the threshold (percent of context used, 1 to 100, default 50), then (mode auto) clear and resume, or (mode nudge, the default) wait for the owner. Pass the absolute run folder, and optionally workflowDoc, the absolute path of the workflow document the successor reads on resume; without it the resume prompt points at the run-state file\'s "how to resume" section.',
         inputSchema: {
           type: 'object',
           properties: {
             runFolder: { type: 'string' },
             mode: { type: 'string', enum: ['nudge', 'auto'] },
             threshold: { type: 'integer', minimum: 1, maximum: 100 },
+            workflowDoc: { type: 'string' },
           },
           required: ['runFolder'],
         },
@@ -531,8 +588,9 @@ export const register: Register = on => {
   // Arms the context watch on a run folder that exists. Arming it again on the
   // same folder leaves it where it is (armed, or mid-nudge).
   on('command.run', { command: HR_WATCH }, async ($, e) => {
-    const { runFolder, mode, threshold } = watchArgs(e.args)
-    return { text: await armWatch($, runFolder, mode, threshold) }
+    const { runFolder, mode, threshold, workflowDoc, unknown } = watchArgs(e.args)
+    if (unknown !== undefined) return { text: `HR: unknown option ${unknown}` }
+    return { text: await armWatch($, runFolder, mode, threshold, workflowDoc) }
   }).catch(() => ({ text: 'HR: the watch could not be armed.' }))
 
   on('command.run', { command: HR_OFF }, async $ => ({ text: await disarmWatch($) })).catch(() => ({
@@ -542,11 +600,11 @@ export const register: Register = on => {
   // The same two functions as the commands above, for the model: the reply
   // text comes back as the tool's result.
   on('tool.call', { tool: 'mcp__workflow-orchestrator__hr_watch' }, async ($, e) => {
-    const input = e as unknown as { runFolder?: unknown; mode?: unknown; threshold?: unknown }
+    const input = e as unknown as { runFolder?: unknown; mode?: unknown; threshold?: unknown; workflowDoc?: unknown }
     const runFolder = typeof input.runFolder === 'string' ? input.runFolder : ''
     const mode = typeof input.mode === 'string' ? input.mode : undefined
     // Passed through as given, so a value of the wrong type is refused, not dropped.
-    return { result: await armWatch($, runFolder, mode, input.threshold) }
+    return { result: await armWatch($, runFolder, mode, input.threshold, input.workflowDoc) }
   }).catch(() => ({ deny: 'HR: the watch could not be armed.' }))
 
   on('tool.call', { tool: 'mcp__workflow-orchestrator__hr_off' }, async $ => ({

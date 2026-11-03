@@ -54,6 +54,10 @@ export type Hr = {
   // has read below the threshold, so a context still over it does not ask for
   // a second handoff on the very next poll.
   waitsForDrop?: boolean
+  // The absolute path of the workflow document the successor reads on resume,
+  // as given to hr_watch or /hr-watch doc=. Absent: the resume prompt points at
+  // the run-state file's "how to resume" section instead.
+  workflowDoc?: string
 }
 
 declare module 'claude-code' {
@@ -62,7 +66,7 @@ declare module 'claude-code' {
       agents: Shaped<Record<string, AgentRow>>
       now: number
       gauge: Gauge
-      hr: Hr
+      hr: Shaped<Hr>
     }
   }
 }
