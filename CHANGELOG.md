@@ -31,10 +31,10 @@ All notable changes to this project are documented here. This project adheres to
 ### Changed
 - **Breaking:** the plugin now registers hooks and tools. Its tool names start
   `mcp__workflow-orchestrator__`.
-- `/workflow-start` is now a thin pointer to the `workflow-start` skill; the engine's behaviour is
-  unchanged.
-- Both commands carry YAML frontmatter (`description`, and `argument-hint` where the command takes
-  arguments).
+- The `/workflow-start` command file is gone. The engine is the `workflow-start` skill, invoked the
+  same way, so it is listed once; the engine's behaviour is unchanged.
+- The `/workflow-capture` command and the `workflow-start` skill carry YAML frontmatter (`description`,
+  and `argument-hint` on the skill, which takes arguments).
 
 ## [1.2.0] — 2026-06-08
 

@@ -6,8 +6,8 @@ under a fixed set of binding rules. All the project-specific content — which p
 they invoke, what they output, what gates they enforce — lives in *your* `docs/WORKFLOW.md`.
 
 This guide explains how to write that file. For the engine's own rules, read
-[`../skills/workflow-start/SKILL.md`](../skills/workflow-start/SKILL.md). The `/workflow-start` command is
-a thin pointer to that skill, so a background agent can run the same engine through its Skill tool.
+[`../skills/workflow-start/SKILL.md`](../skills/workflow-start/SKILL.md). `/workflow-start` is that
+skill, the only entry for the engine, so a background agent can run the same engine through its Skill tool.
 
 ## The mental model
 

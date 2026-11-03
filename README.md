@@ -1,10 +1,10 @@
 # workflow-orchestrator
 
 A generic, **project-agnostic pipeline orchestrator** for Claude Code, packaged as an installable
-plugin. It adds two commands, and, since 2.0, the [fleet mechanics](#fleet-mechanics-20) for running a
-workflow across named background agents:
+plugin. It adds the `workflow-start` skill and the `/workflow-capture` command, and, since 2.0, the
+[fleet mechanics](#fleet-mechanics-20) for running a workflow across named background agents:
 
-- **`/workflow-start`** reads your project's `docs/WORKFLOW.md` and drives its phases in order under a
+- **`/workflow-start`** (the `workflow-start` skill, which is the only entry for the engine) reads your project's `docs/WORKFLOW.md` and drives its phases in order under a
   fixed set of binding rules: phases run in sequence, every declared output is produced before
   advancing, consent gates block on explicit approval, and the engine keeps control even when an invoked
   sub-skill tries to decide what happens next.
@@ -178,8 +178,8 @@ clear. After a person's `/clear` in `nudge` mode the watch stays off. Either way
   person go through the main session.
 - A named agent's own helpers are unnamed and run in the foreground; the agent waits for each one.
 - The session's permission mode and plan mode apply to every agent in the tree.
-- A background agent can call skills but not plugin commands. That is why the engine also ships as the
-  `workflow-orchestrator:workflow-start` skill.
+- A background agent can call skills but not plugin commands. That is why the engine is the
+  `workflow-orchestrator:workflow-start` skill rather than a command.
 
 ## What a repo must provide
 
@@ -233,8 +233,8 @@ see each one twice.
 
 ```text
 .claude-plugin/   plugin + marketplace manifests
-commands/         /workflow-start (a pointer to the skill) + the /workflow-capture authoring command
-skills/           the workflow-start engine, as a skill agents can call
+commands/         the /workflow-capture authoring command
+skills/           the workflow-start engine, a skill you invoke as /workflow-start and agents can call
 hooks/            the Agents pane, the context gauge, the context watch, and the three tools
 types/            type definitions for the plugin's hooks module
 tests/            tests for the hooks module
