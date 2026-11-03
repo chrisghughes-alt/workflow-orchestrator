@@ -114,6 +114,38 @@ test('the header says ? when the context share is not known yet', async ($, on) 
   await ui.unmount()
 })
 
+test('an agent with no activity for over ten minutes is marked silent, a done one never', async ($, on) => {
+  const clock = mock.clock(on)
+  let list = [{ id: 'a1', description: 'Survey the repo', type: 'Explore', status: 'running' }]
+  on('agent.list', () => ({ value: list }))
+  on('session.usage', () => usage(10))
+  on('command.register', (_, e) => ({ value: { command: e.name } }))
+  on('ui.open', () => ({ value: { isPlaced: true } }))
+  on('session.start', (_, e) => ({ cwd: e.cwd }))
+  on('tool.call', () => ({ result: {} }))
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+
+  const stats = async () => {
+    const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+    const row = await ui.find({ type: 'Text', text: /↑/ })
+    await ui.unmount()
+    return row?.text ?? ''
+  }
+
+  await clock.advance(1500)
+  await $.tool.call({ tool: 'Bash', command: 'ls', agentId: 'a1' } as never)
+  await clock.advance(5 * 60_000)
+  expect(await stats()).not.toContain('silent')
+
+  await clock.advance(6 * 60_000)
+  // The pane's clock moves on the 1-second poll, so the figure lags by up to a second.
+  expect(await stats()).toMatch(/ · ⚠ silent 1[01]m\d\ds$/)
+
+  list = [{ ...list[0]!, status: 'completed' }]
+  await clock.advance(1500)
+  expect(await stats()).not.toContain('silent')
+})
+
 test('a finished agent leaves the sidebar once the engine stops listing it', async ($, on) => {
   const clock = mock.clock(on)
   let list: { id: string; description: string; type: string; status: string }[] = [

@@ -8,6 +8,8 @@ const COMMAND = 'agent-sidebar'
 const MAX_ROWS = 40
 const POLL_MS = 1000
 const UNLISTED_GRACE_MS = 10_000
+// A running agent with no model request or tool call for this long is marked silent.
+const SILENT_MS = 10 * 60_000
 
 // Change the tag when AgentRow's fields change: a reload keeps what the old
 // code stored, and the tag makes the new code start fresh instead of misreading it.
@@ -290,6 +292,7 @@ export const register: Register = on => {
           const isViewed = viewing === row.id
           const label = row.name ?? (row.description || row.type || row.id)
           const elapsed = duration((row.endedAt ?? (clock || row.lastAt)) - row.startedAt)
+          const quiet = isDone ? 0 : clock - row.lastAt
           return (
             <Box key={`box-${row.id}`} flexDirection="column" marginTop={1}>
               <Button key={row.id} plain onPress={() => void show(row.id)}>
@@ -309,6 +312,8 @@ export const register: Register = on => {
                   · {elapsed} · ↑{tokens(row.tokensIn)} ↓{tokens(row.tokensOut)} · ctx{' '}
                   {tokens(row.context)}
                 </Text>
+                {/* The glyph and the word carry the warning, not the color alone. */}
+                {quiet > SILENT_MS && <Text color="warning"> · ⚠ silent {duration(quiet)}</Text>}
               </Text>
             </Box>
           )
