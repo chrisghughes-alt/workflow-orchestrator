@@ -12,6 +12,12 @@ All notable changes to this project are documented here. This project adheres to
   characters or carries control characters, and a `workflowDoc` that is not on disk, before either
   path can reach a prompt.
 
+### Changed
+- README rebuilt around the two things the plugin does — agent management views and pipeline
+  enforcement, usable alone or together — with an "HR for AI" section on context cycling and
+  screenshots under `docs/images/`.
+- The repository's `CLAUDE.md` describes the 2.0 layout (skill, command, hooks module, tests).
+
 ## [2.0.0] — 2026-11-03
 
 ### Added
