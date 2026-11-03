@@ -15,6 +15,10 @@ export type AgentRow = {
   tokensOut: number
   // The size of its last request: how full its context window is.
   context: number
+  // The context window $.session.usage() reported from inside this agent's own
+  // turn.step hook. The contract documents it as the session's model's window,
+  // so it may be the main loop's rather than this agent's: unverified per agent.
+  window?: number
   steps: number
   startedAt: number
   lastAt: number

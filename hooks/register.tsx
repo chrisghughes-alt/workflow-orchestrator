@@ -25,7 +25,7 @@ const WORKFLOW_DOC = 'C:\\Code-Repos\\Equipment Check\\docs\\Native-Agent-Workfl
 // Change the tag when AgentRow's fields change: a reload keeps what the old
 // code stored, and the tag makes the new code start fresh instead of misreading it.
 const agents = atom({ plugin: 'agent-sidebar', key: 'agents' } as const, {}, {
-  shape: 'agents-1',
+  shape: 'agents-2',
 })
 // The clock the pane draws elapsed times from; ticks only while an agent runs.
 const now = atom({ plugin: 'agent-sidebar', key: 'now' } as const, 0)
@@ -195,7 +195,15 @@ function rosterRow(row: AgentRow) {
     startedAt: row.startedAt,
     lastAt: row.lastAt,
     endedAt: row.endedAt ?? null,
+    // As read inside the agent's own step; null before its first.
+    window: row.window ?? null,
   }
+}
+
+// "123k", or "123k (41%)" once a window is known for the row.
+function contextOf(row: AgentRow): string {
+  if (row.window === undefined || row.window <= 0) return tokens(row.context)
+  return `${tokens(row.context)} (${Math.round((row.context / row.window) * 100)}%)`
 }
 
 // Each model family gets a color, and also a glyph and a text tag, so the
@@ -407,8 +415,15 @@ export const register: Register = on => {
       const sent =
         usage.input_tokens + usage.cache_read_input_tokens + usage.cache_creation_input_tokens
       const at = await $.clock.now()
+      // Read from inside this agent's own hook, in case the engine scopes it to
+      // the agent. The contract does not say it does; unverified per agent.
+      const window = await $.session
+        .usage()
+        .then(u => u.context.window)
+        .catch(() => undefined)
       await patch($, id, at, row => ({
         ...row,
+        window: window ?? row.window,
         model: row.model || usage.model,
         tokensIn: row.tokensIn + sent,
         tokensOut: row.tokensOut + usage.output_tokens,
@@ -534,7 +549,7 @@ export const register: Register = on => {
                 <Text dimColor>
                   {' '}
                   · {elapsed} · ↑{tokens(row.tokensIn)} ↓{tokens(row.tokensOut)} · ctx{' '}
-                  {tokens(row.context)}
+                  {contextOf(row)}
                 </Text>
                 {/* The glyph and the word carry the warning, not the color alone. */}
                 {quiet > SILENT_MS && <Text color="warning"> · ⚠ silent {duration(quiet)}</Text>}

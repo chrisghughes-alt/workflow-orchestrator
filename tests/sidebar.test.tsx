@@ -186,8 +186,44 @@ test('the model can read the sidebar as JSON through the agents tool', async ($,
     }),
   )
   expect(Object.keys(rows[0]!).sort()).toEqual(
-    ['activity', 'context', 'endedAt', 'id', 'lastAt', 'model', 'name', 'startedAt', 'status', 'steps', 'tokensIn', 'tokensOut'].sort(),
+    ['activity', 'context', 'endedAt', 'id', 'lastAt', 'model', 'name', 'startedAt', 'status', 'steps', 'tokensIn', 'tokensOut', 'window'].sort(),
   )
+  // No step yet, so no window read.
+  expect(rows[0]!.window).toBe(null)
+})
+
+test('an agent whose step read a context window shows how full it is', async ($, on) => {
+  on('clock.now', () => ({ value: 1_000_000 }))
+  on('agent.spawn', () => ({ model: 'claude-sonnet-5-5', agentId: 'a1' }))
+  on('session.usage', () => usage(10))
+  on('turn.step', async function* (_, e) {
+    return {
+      turnId: e.turnId,
+      index: e.index,
+      answer: '',
+      toolUses: [],
+      stopReason: 'end_turn',
+      usage: {
+        model: 'claude-sonnet-5-5',
+        input_tokens: 1200,
+        output_tokens: 300,
+        cache_read_input_tokens: 10000,
+        cache_creation_input_tokens: 0,
+      },
+    }
+  })
+
+  await $.agent.spawn({ prompt: 'look around', description: 'Survey the repo' })
+  for await (const _ of $.turn.step({ turnId: 't1', index: 0, model: 'claude-sonnet-5-5', messageCount: 1, agentId: 'a1' } as never)) {
+    // drain
+  }
+
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  // 11,500 of a 200,000 window.
+  expect((await ui.find({ type: 'Text', text: /↑/ }))?.text).toContain('ctx 12k (6%)')
+  await ui.unmount()
+  const r = await $.tool.call({ tool: 'mcp__agent-sidebar__agents' } as never)
+  expect((JSON.parse(r.result as string) as { window: unknown }[])[0]!.window).toBe(200_000)
 })
 
 const RUN = 'C:\\runs\\r1'
