@@ -652,6 +652,48 @@ test('a second session start, as /clear may raise, leaves one poll running, not 
   expect(lists).toBe(5)
 })
 
+test('the Agents pane opens once, unfocused, when the first background agent appears', async ($, on) => {
+  const clock = mock.clock(on)
+  let list: { id: string; description: string; type: string; status: string }[] = []
+  on('agent.list', () => ({ value: list }))
+  on('session.usage', () => usage(10))
+  on('command.register', (_, e) => ({ value: { command: e.name } }))
+  on('tool.register', (_, e) => ({ value: { tool: `mcp__workflow-orchestrator__${e.name}` } }))
+  const opens: { id: string; title?: string; focus?: boolean }[] = []
+  on('ui.open', (_, e) => {
+    opens.push(e)
+    return { value: { isPlaced: true } }
+  })
+  on('ui.panes', () => ({ value: [] }))
+  on('session.start', (_, e) => ({ cwd: e.cwd }))
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+
+  // No agent yet: the session start and the polls leave the pane closed.
+  expect(opens).toEqual([])
+  await clock.advance(3000)
+  expect(opens).toEqual([])
+
+  // The first agent shows up: one open, without focus.
+  list = [{ id: 'a1', description: 'Survey the repo', type: 'Explore', status: 'running' }]
+  await clock.advance(1500)
+  expect(opens.length).toBe(1)
+  expect(opens[0]!.id).toBe('agent-sidebar')
+  expect(opens[0]!.focus).toBeUndefined()
+
+  // Later polls, a second agent, and a new session start open nothing more.
+  list = [...list, { id: 'a2', description: 'Write the tests', type: 'general-purpose', status: 'running' }]
+  await clock.advance(3000)
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await clock.advance(3000)
+  expect(opens.length).toBe(1)
+
+  // The command still opens it, with focus.
+  const r = await $.command.run({ command: 'agent-sidebar' })
+  expect(r.text).toBe('Agents sidebar opened.')
+  expect(opens.length).toBe(2)
+  expect(opens[1]!.focus).toBe(true)
+})
+
 test('a finished agent leaves the sidebar once the engine stops listing it', async ($, on) => {
   const clock = mock.clock(on)
   let list: { id: string; description: string; type: string; status: string }[] = [

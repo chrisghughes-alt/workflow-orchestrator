@@ -128,6 +128,20 @@ let isClearing = false
 // Set when /hr-off or the hr_off tool runs while a clear is in flight, so the
 // end of that clear does not re-arm a watch the owner turned off.
 let isOffDuringClear = false
+// Set once the poll has opened the Agents pane for the first background agent,
+// or the person opened it with the command, so later polls never open it again.
+let hasOpenedPane = false
+
+// Opens the Agents pane, without focus, the first time the roster has a row.
+// The engine's own list of open panes outlives a module reload, so a pane
+// already up (the person's, or one from before a /clear) is left alone.
+async function openPaneForFirstAgent($: Dollar): Promise<void> {
+  if (hasOpenedPane) return
+  hasOpenedPane = true
+  const panes = await $.ui.panes().catch(() => [])
+  if (panes.some(pane => pane.id === PANE)) return
+  await $.ui.open({ id: PANE, title: 'Agents' }).catch(() => undefined)
+}
 
 // Whether the stored watch reads as never armed, which is how it reads once a
 // /clear has wiped the plugin's values. /hr-off leaves the same shape behind,
@@ -376,7 +390,8 @@ export const register: Register = on => {
       })
       .catch(() => undefined)
     await $.command.register({ name: HR_OFF, description: 'Disarm the context watch' }).catch(() => undefined)
-    void $.ui.open({ id: PANE, title: 'Agents' })
+    // The pane is not opened here: the poll opens it when the first background
+    // agent appears, and /agent-sidebar opens it any time.
     // A failed registration costs the model the tool, never the sidebar its poll.
     await $.tool
       .register({
@@ -465,6 +480,7 @@ export const register: Register = on => {
         if (Object.values(merged).some(row => !DONE.has(row.status))) {
           await update($, now, () => at)
         }
+        if (Object.keys(merged).length > 0) await openPaneForFirstAgent($)
       })()
       // Separate from the list refresh, so a failed usage read never stops it.
       void (async () => {
@@ -506,6 +522,7 @@ export const register: Register = on => {
   })
 
   on('command.run', { command: COMMAND }, async $ => {
+    hasOpenedPane = true
     await $.ui.open({ id: PANE, title: 'Agents', focus: true })
 
     return { text: 'Agents sidebar opened.' }
