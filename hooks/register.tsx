@@ -1,7 +1,7 @@
 import { atom, read, update } from 'claude-code'
 import type { AgentInfo, Register } from 'claude-code'
 
-import type { AgentRow, Gauge, Hr } from '../types'
+import type { AgentRow, Gauge, Hr, HrMode } from '../types'
 
 const PANE = 'agent-sidebar'
 const COMMAND = 'agent-sidebar'
@@ -15,9 +15,10 @@ const SILENT_MS = 10 * 60_000
 
 // The context watch: at this share of the main window used, ask for a handoff.
 const HR_THRESHOLD = 50
-// Stays false until the /clear survival test passes: a seen handoff then only
-// re-arms the watch, and nothing clears the conversation.
+// Stays false until the /clear survival test passes. While false, auto mode is
+// refused and the watch arms in nudge mode, so nothing clears the conversation.
 const CLEAR_ENABLED = false
+const AUTO_DISABLED_TEXT = 'auto mode is not enabled in this build yet; armed in nudge mode'
 const HR_WATCH = 'hr-watch'
 const HR_OFF = 'hr-off'
 const WORKFLOW_DOC = 'C:\\Code-Repos\\Equipment Check\\docs\\Native-Agent-Workflow.md'
@@ -34,8 +35,14 @@ const gauge = atom({ plugin: 'agent-sidebar', key: 'gauge' } as const, { window:
 const hr = atom({ plugin: 'agent-sidebar', key: 'hr' } as const, {
   runFolder: '',
   phase: 'off',
+  mode: 'nudge',
   threshold: HR_THRESHOLD,
 } as Hr)
+
+// A value stored before modes existed has none: it was a nudge-only watch.
+function modeOf(state: Hr): HrMode {
+  return state.mode === 'auto' ? 'auto' : 'nudge'
+}
 
 function nudgeText(percent: number, runFolder: string): string {
   return (
@@ -66,8 +73,8 @@ type HandoffIo = {
 
 // After the main loop's turn ends while nudged: looks for a handoff written
 // since the nudge (the newest .md in the run's handoffs folder). None: still
-// nudged. Found: with /clear disabled the nudge did its job and the watch
-// re-arms; enabled, the next poll clears and resumes.
+// nudged. Found: in auto mode with /clear enabled, the next poll clears and
+// resumes; otherwise the watch is ready and waits for the owner to clear.
 export async function seeHandoff(state: Hr, io: HandoffIo, clearEnabled: boolean): Promise<Hr> {
   if (state.phase !== 'nudged') return state
   const since = state.nudgedAt ?? 0
@@ -78,11 +85,9 @@ export async function seeHandoff(state: Hr, io: HandoffIo, clearEnabled: boolean
     .sort((a, b) => b.mtimeMs - a.mtimeMs)[0]
   if (newest === undefined) return state
   const handoffPath = within(folder, newest.name)
-  if (!clearEnabled) {
-    io.toast('HR: handoff seen; /clear disabled')
-    return { ...state, handoffPath, phase: 'armed', waitsForDrop: true }
-  }
-  return { ...state, handoffPath, phase: 'clearing' }
+  if (modeOf(state) === 'auto' && clearEnabled) return { ...state, handoffPath, phase: 'clearing' }
+  io.toast('HR: handoff written; run /clear when ready')
+  return { ...state, handoffPath, phase: 'ready' }
 }
 
 type ClearIo = {
@@ -106,6 +111,55 @@ export async function finishClear(state: Hr, io: ClearIo): Promise<Hr> {
 
 type Dollar = Parameters<typeof update>[0]
 type Map = Record<string, AgentRow>
+
+// Splits /hr-watch's arguments into the run folder and an optional last word
+// naming the mode. The folder may hold spaces, so only a last word of nudge or
+// auto is taken as the mode.
+function watchArgs(args: string): { runFolder: string; mode?: string } {
+  const text = args.trim()
+  const found = /^(.*\S)\s+(nudge|auto)$/i.exec(text)
+  return found ? { runFolder: found[1]!, mode: found[2]!.toLowerCase() } : { runFolder: text }
+}
+
+// Arms the context watch on a run folder that exists, in nudge mode unless
+// auto is asked for and /clear is enabled. Arming it again on the same folder
+// in the same mode leaves it where it is (armed, or mid-nudge); from ready it
+// re-arms. Returns the reply shown to whoever asked.
+async function armWatch($: Dollar, runFolder: string, mode: string | undefined): Promise<string> {
+  const path = runFolder.trim()
+  if (path === '') return 'HR: give the run folder: /hr-watch <absolute path> [nudge|auto]. The watch stays off.'
+  if (mode !== undefined && mode !== 'nudge' && mode !== 'auto')
+    return `HR: unknown mode ${mode}; use nudge or auto. The watch is unchanged.`
+  const exists = await $.fs.exists(path).catch(() => false)
+  if (!exists) return `HR: no folder at ${path}. The watch stays off.`
+  const wanted: HrMode = mode === 'auto' && CLEAR_ENABLED ? 'auto' : 'nudge'
+  await update($, hr, (cur: Hr) => {
+    const isWatching = cur.phase === 'armed' || cur.phase === 'nudged' || cur.phase === 'clearing'
+    if (isWatching && cur.runFolder === path && modeOf(cur) === wanted) return cur
+    return {
+      runFolder: path,
+      phase: 'armed',
+      mode: wanted,
+      threshold: cur.threshold || HR_THRESHOLD,
+      // Re-armed from ready the context is likely still over the threshold:
+      // wait for it to drop before asking for another handoff.
+      ...(cur.phase === 'ready' ? { waitsForDrop: true } : {}),
+    }
+  })
+  if (mode === 'auto' && !CLEAR_ENABLED) return AUTO_DISABLED_TEXT
+  return wanted === 'auto' ? `HR armed on ${path} in auto mode` : `HR armed on ${path}`
+}
+
+// Turns the watch off and forgets its run.
+async function disarmWatch($: Dollar): Promise<string> {
+  await update($, hr, (cur: Hr) => ({
+    runFolder: '',
+    phase: 'off',
+    mode: 'nudge',
+    threshold: cur.threshold || HR_THRESHOLD,
+  }))
+  return 'HR off'
+}
 
 const DONE = new Set(['completed', 'failed', 'killed'])
 
@@ -360,22 +414,13 @@ export const register: Register = on => {
   // Arms the context watch on a run folder that exists. Arming it again on the
   // same folder leaves it where it is (armed, or mid-nudge).
   on('command.run', { command: HR_WATCH }, async ($, e) => {
-    const path = e.args.trim()
-    if (path === '') return { text: 'HR: give the run folder: /hr-watch <absolute path>. The watch stays off.' }
-    const exists = await $.fs.exists(path).catch(() => false)
-    if (!exists) return { text: `HR: no folder at ${path}. The watch stays off.` }
-    await update($, hr, (cur: Hr) =>
-      cur.runFolder === path && cur.phase !== 'off'
-        ? cur
-        : { runFolder: path, phase: 'armed', threshold: cur.threshold || HR_THRESHOLD },
-    )
-    return { text: `HR armed on ${path}` }
+    const { runFolder, mode } = watchArgs(e.args)
+    return { text: await armWatch($, runFolder, mode) }
   }).catch(() => ({ text: 'HR: the watch could not be armed.' }))
 
-  on('command.run', { command: HR_OFF }, async $ => {
-    await update($, hr, (cur: Hr) => ({ ...cur, phase: 'off', nudgedAt: undefined }))
-    return { text: 'HR off' }
-  }).catch(() => ({ text: 'HR: the watch could not be turned off.' }))
+  on('command.run', { command: HR_OFF }, async $ => ({ text: await disarmWatch($) })).catch(() => ({
+    text: 'HR: the watch could not be turned off.',
+  }))
 
   // The spawn is the one place the engine says which model an agent runs on.
   on('agent.spawn', async ($, e, next) => {
@@ -500,7 +545,9 @@ export const register: Register = on => {
     const clock = await read($, now)
     const fill = await read($, gauge)
     const watch = await read($, hr)
-    const hrPart = watch.phase === 'off' ? '' : ` · HR ${watch.phase}`
+    // Armed shows the mode (nudge or auto); every later phase shows itself.
+    const hrPart =
+      watch.phase === 'off' ? '' : ` · HR ${watch.phase === 'armed' ? modeOf(watch) : watch.phase}`
     const width = Math.max(20, e.props.bodyColumns ?? 40)
     const viewing = e.props.view?.agentId
 

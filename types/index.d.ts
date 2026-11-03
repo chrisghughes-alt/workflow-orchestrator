@@ -37,11 +37,16 @@ export type Gauge = {
 
 // The context watch. `off` until /hr-watch arms it on a run folder; `armed`
 // waits for the gauge to reach the threshold; `nudged` has asked the main loop
-// for a handoff and waits for the file; `clearing` runs /clear and the resume.
-export type HrPhase = 'off' | 'armed' | 'nudged' | 'clearing'
+// for a handoff and waits for the file. Then, in nudge mode, `ready`: the
+// handoff exists and the owner runs /clear; in auto mode, `clearing` runs
+// /clear and the resume prompt, then back to `armed`.
+export type HrPhase = 'off' | 'armed' | 'nudged' | 'ready' | 'clearing'
+export type HrMode = 'nudge' | 'auto'
 export type Hr = {
   runFolder: string
   phase: HrPhase
+  // Absent in a value stored before modes existed; read as nudge.
+  mode?: HrMode
   threshold: number
   nudgedAt?: number
   handoffPath?: string

@@ -291,6 +291,21 @@ test('/hr-watch on a missing folder stays off', async ($, on) => {
   expect(await header($)).not.toContain('HR')
 })
 
+test('/hr-watch with a mode word: nudge arms in nudge, auto is refused while /clear is disabled', async ($, on) => {
+  const { clock } = hrEngine(on)
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+
+  expect((await $.command.run({ command: 'hr-watch', args: `${RUN} nudge` })).text).toBe(`HR armed on ${RUN}`)
+  await clock.advance(1500)
+  expect(await header($)).toContain('HR nudge ·')
+
+  await $.command.run({ command: 'hr-off', args: '' })
+  const auto = await $.command.run({ command: 'hr-watch', args: `${RUN} auto` })
+  expect(auto.text).toBe('auto mode is not enabled in this build yet; armed in nudge mode')
+  await clock.advance(1500)
+  expect(await header($)).toContain('HR nudge ·')
+})
+
 test('the watch nudges once at the threshold, then waits for a new handoff file', async ($, on) => {
   const { clock, world } = hrEngine(on)
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
@@ -300,7 +315,8 @@ test('the watch nudges once at the threshold, then waits for a new handoff file'
   // Arming again changes nothing.
   expect((await $.command.run({ command: 'hr-watch', args: RUN })).text).toBe(`HR armed on ${RUN}`)
   await clock.advance(1500)
-  expect(await header($)).toContain('ctx used 10% · HR armed · 0 running')
+  // No mode word: nudge mode, shown as the mode while armed.
+  expect(await header($)).toContain('ctx used 10% · HR nudge · 0 running')
   expect(world.submits).toEqual([])
 
   world.percent = 55
@@ -325,17 +341,29 @@ test('the watch nudges once at the threshold, then waits for a new handoff file'
   await clock.advance(1500)
   expect(await header($)).toContain('HR nudged')
 
-  // The main turn ends with a new handoff: with /clear disabled the watch re-arms and does nothing else.
+  // Nudge mode: the main turn ends with a new handoff, the watch is ready and does nothing else.
   await $.turn.complete(mainTurnEnds)
   await clock.advance(1500)
-  expect(await header($)).toContain('HR armed')
+  expect(await header($)).toContain('HR ready')
   expect(world.commands.filter(c => c === 'clear')).toEqual([])
   expect(world.submits.length).toBe(1)
-  expect(world.toasts.some(t => t.includes('HR: handoff seen; /clear disabled'))).toBe(true)
+  expect(world.toasts.some(t => t.includes('HR: handoff written; run /clear when ready'))).toBe(true)
 
-  // Re-armed while still over the threshold: no second nudge until the gauge
-  // has dropped below it and climbed back.
+  // Ready: nothing fires, whatever the gauge does.
+  world.percent = 30
+  await clock.advance(1500)
+  world.percent = 60
+  await clock.advance(1500)
+  await $.turn.complete(mainTurnEnds)
+  await clock.advance(1500)
+  expect(world.submits.length).toBe(1)
+  expect(await header($)).toContain('HR ready')
+
+  // /hr-watch again re-arms. Still over the threshold, so no nudge until the
+  // gauge has dropped below it and climbed back.
+  expect((await $.command.run({ command: 'hr-watch', args: RUN })).text).toBe(`HR armed on ${RUN}`)
   await clock.advance(3000)
+  expect(await header($)).toContain('HR nudge ·')
   expect(world.submits.length).toBe(1)
   world.percent = 30
   await clock.advance(1500)
@@ -351,8 +379,8 @@ test('the watch nudges once at the threshold, then waits for a new handoff file'
   expect(await header($)).not.toContain('HR')
 })
 
-test('with /clear enabled, a seen handoff clears and then hands the successor its start prompt', async () => {
-  const nudged: Hr = { runFolder: RUN, phase: 'nudged', threshold: 50, nudgedAt: 5000 }
+test('in auto mode with /clear enabled, a seen handoff clears and then hands the successor its start prompt', async () => {
+  const nudged: Hr = { runFolder: RUN, phase: 'nudged', mode: 'auto', threshold: 50, nudgedAt: 5000 }
   const toasts: string[] = []
   const handoffs: Fs[] = [
     { name: 'older.md', kind: 'file', size: 1, mtimeMs: 6000, isLink: false },
@@ -363,6 +391,11 @@ test('with /clear enabled, a seen handoff clears and then hands the successor it
   const seen = await seeHandoff(nudged, { list: async () => handoffs, toast: t => void toasts.push(t) }, true)
   expect(seen.phase).toBe('clearing')
   expect(seen.handoffPath).toBe(`${RUN}\\handoffs\\newer.md`)
+
+  // Nudge mode never clears, even with /clear enabled; auto with it disabled neither.
+  const io = { list: async () => handoffs, toast: (t: string) => void toasts.push(t) }
+  expect((await seeHandoff({ ...nudged, mode: 'nudge' }, io, true)).phase).toBe('ready')
+  expect((await seeHandoff(nudged, io, false)).phase).toBe('ready')
 
   const calls: string[] = []
   const done = await finishClear(seen, {
