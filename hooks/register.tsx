@@ -219,15 +219,14 @@ function isThreshold(value: unknown): value is number {
   return typeof value === 'number' && Number.isInteger(value) && value >= 1 && value <= 100
 }
 
-// "HR armed on <folder>", then the mode when auto, the threshold when not the
-// default and the workflow document when given: "(auto)", "(5%)",
-// "(auto, 5%)" or "(auto, 5%, doc <path>)".
+// "HR armed on <folder> (<mode>, <threshold>%)", always stating the mode and
+// the threshold so the reply never hides a default, with ", doc <path>" inside
+// the parentheses when a workflow document was given: "(nudge, 50%)" or
+// "(auto, 1%, doc <path>)".
 function armedText(path: string, state: Hr): string {
-  const parts: string[] = []
-  if (modeOf(state) === 'auto') parts.push('auto')
-  if (state.threshold !== HR_THRESHOLD) parts.push(`${state.threshold}%`)
+  const parts: string[] = [modeOf(state), `${state.threshold}%`]
   if (state.workflowDoc !== undefined) parts.push(`doc ${state.workflowDoc}`)
-  return parts.length === 0 ? `HR armed on ${path}` : `HR armed on ${path} (${parts.join(', ')})`
+  return `HR armed on ${path} (${parts.join(', ')})`
 }
 
 // Arms the context watch on a run folder that exists, in nudge mode unless

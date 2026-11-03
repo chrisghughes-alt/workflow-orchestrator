@@ -310,13 +310,13 @@ test('/hr-watch with a mode word: nudge arms in nudge, auto arms in auto', async
   const { clock } = hrEngine(on)
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
 
-  expect((await $.command.run({ command: 'hr-watch', args: `${RUN} nudge` })).text).toBe(`HR armed on ${RUN}`)
+  expect((await $.command.run({ command: 'hr-watch', args: `${RUN} nudge` })).text).toBe(`HR armed on ${RUN} (nudge, 50%)`)
   await clock.advance(1500)
   expect(await header($)).toContain('HR nudge ·')
 
   await $.command.run({ command: 'hr-off', args: '' })
   const auto = await $.command.run({ command: 'hr-watch', args: `${RUN} auto` })
-  expect(auto.text).toBe(`HR armed on ${RUN} (auto)`)
+  expect(auto.text).toBe(`HR armed on ${RUN} (auto, 50%)`)
   await clock.advance(1500)
   expect(await header($)).toContain('HR auto ·')
 })
@@ -347,13 +347,13 @@ test('the model arms and disarms the watch through the hr_watch and hr_off tools
   expect(await header($)).not.toContain('HR')
 
   const armed = await $.tool.call({ tool: 'mcp__workflow-orchestrator__hr_watch', runFolder: RUN, mode: 'nudge' } as never)
-  expect(armed.result).toBe(`HR armed on ${RUN}`)
+  expect(armed.result).toBe(`HR armed on ${RUN} (nudge, 50%)`)
   await clock.advance(1500)
   expect(await header($)).toContain('ctx used 10% · HR nudge · 0 running')
 
   // Auto: re-arms in auto mode.
   const auto = await $.tool.call({ tool: 'mcp__workflow-orchestrator__hr_watch', runFolder: RUN, mode: 'auto' } as never)
-  expect(auto.result).toBe(`HR armed on ${RUN} (auto)`)
+  expect(auto.result).toBe(`HR armed on ${RUN} (auto, 50%)`)
   await clock.advance(1500)
   expect(await header($)).toContain('ctx used 10% · HR auto · 0 running')
 
@@ -372,7 +372,7 @@ test('hr_watch takes a threshold: at 5 a 6% reading nudges, and a bad one is ref
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
 
   const armed = await $.tool.call({ tool: 'mcp__workflow-orchestrator__hr_watch', runFolder: RUN, threshold: 5 } as never)
-  expect(armed.result).toBe(`HR armed on ${RUN} (5%)`)
+  expect(armed.result).toBe(`HR armed on ${RUN} (nudge, 5%)`)
   await clock.advance(1500)
   expect(await header($)).toContain('ctx used 2% · HR nudge · 0 running')
   expect(world.submits).toEqual([])
@@ -391,10 +391,10 @@ test('hr_watch takes a threshold: at 5 a 6% reading nudges, and a bad one is ref
   expect(world.submits.length).toBe(1)
   expect(world.submits[0]).toContain('[HR] Context used 6%.')
 
-  // The default threshold, given or not, adds nothing to the reply.
+  // The default threshold, given or not, is still stated in the reply.
   await $.tool.call({ tool: 'mcp__workflow-orchestrator__hr_off' } as never)
   const plain = await $.tool.call({ tool: 'mcp__workflow-orchestrator__hr_watch', runFolder: RUN, mode: 'auto', threshold: 50 } as never)
-  expect(plain.result).toBe(`HR armed on ${RUN} (auto)`)
+  expect(plain.result).toBe(`HR armed on ${RUN} (auto, 50%)`)
 })
 
 test('/hr-watch reads a threshold as the word after the mode', async ($, on) => {
@@ -421,9 +421,9 @@ test('/hr-watch reads a threshold as the word after the mode', async ($, on) => 
 
   // Off, then armed with no threshold: back to the default.
   await $.command.run({ command: 'hr-off', args: '' })
-  expect((await $.command.run({ command: 'hr-watch', args: `${RUN} nudge 5` })).text).toBe(`HR armed on ${RUN} (5%)`)
+  expect((await $.command.run({ command: 'hr-watch', args: `${RUN} nudge 5` })).text).toBe(`HR armed on ${RUN} (nudge, 5%)`)
   await $.command.run({ command: 'hr-off', args: '' })
-  expect((await $.command.run({ command: 'hr-watch', args: RUN })).text).toBe(`HR armed on ${RUN}`)
+  expect((await $.command.run({ command: 'hr-watch', args: RUN })).text).toBe(`HR armed on ${RUN} (nudge, 50%)`)
 })
 
 test('hr_watch keeps a workflowDoc and the resume prompt hands it to the successor', async ($, on) => {
@@ -468,7 +468,7 @@ test('/hr-watch reads key=value options, a doc path with spaces last, and refuse
   await $.command.run({ command: 'hr-off', args: '' })
   // A doc with no space may come before the other options.
   expect(await run(`${RUN} doc=C:\\Docs\\flow.md mode=nudge threshold=7`)).toBe(
-    `HR armed on ${RUN} (7%, doc C:\\Docs\\flow.md)`,
+    `HR armed on ${RUN} (nudge, 7%, doc C:\\Docs\\flow.md)`,
   )
   expect(await run(`${RUN} nudge threshold=abc`)).toBe(THRESHOLD_REFUSED)
   expect(await run(`${RUN} mode=sideways`)).toBe('HR: unknown mode sideways; use nudge or auto. The watch is unchanged.')
@@ -494,9 +494,9 @@ test('the watch nudges once at the threshold, then waits for a new handoff file'
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
 
   const r = await $.command.run({ command: 'hr-watch', args: RUN })
-  expect(r.text).toBe(`HR armed on ${RUN}`)
+  expect(r.text).toBe(`HR armed on ${RUN} (nudge, 50%)`)
   // Arming again changes nothing.
-  expect((await $.command.run({ command: 'hr-watch', args: RUN })).text).toBe(`HR armed on ${RUN}`)
+  expect((await $.command.run({ command: 'hr-watch', args: RUN })).text).toBe(`HR armed on ${RUN} (nudge, 50%)`)
   await clock.advance(1500)
   // No mode word: nudge mode, shown as the mode while armed.
   expect(await header($)).toContain('ctx used 10% · HR nudge · 0 running')
@@ -544,7 +544,7 @@ test('the watch nudges once at the threshold, then waits for a new handoff file'
 
   // /hr-watch again re-arms. Still over the threshold, so no nudge until the
   // gauge has dropped below it and climbed back.
-  expect((await $.command.run({ command: 'hr-watch', args: RUN })).text).toBe(`HR armed on ${RUN}`)
+  expect((await $.command.run({ command: 'hr-watch', args: RUN })).text).toBe(`HR armed on ${RUN} (nudge, 50%)`)
   await clock.advance(3000)
   expect(await header($)).toContain('HR nudge ·')
   expect(world.submits.length).toBe(1)
@@ -658,7 +658,7 @@ test('in auto mode the watch clears, resumes and re-arms, though the clear wipes
   }
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
 
-  expect((await $.command.run({ command: 'hr-watch', args: `${RUN} auto` })).text).toBe(`HR armed on ${RUN} (auto)`)
+  expect((await $.command.run({ command: 'hr-watch', args: `${RUN} auto` })).text).toBe(`HR armed on ${RUN} (auto, 50%)`)
   await clock.advance(1500)
   expect(await header($)).toContain('HR auto ·')
 

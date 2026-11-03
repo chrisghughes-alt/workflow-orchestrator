@@ -33,6 +33,8 @@ All notable changes to this project are documented here. This project adheres to
   `mcp__workflow-orchestrator__`.
 - The `/workflow-start` command file is gone. The engine is the `workflow-start` skill, invoked the
   same way, so it is listed once; the engine's behaviour is unchanged.
+- The reply after arming the context watch always states the mode and threshold, for example
+  `HR armed on <folder> (nudge, 50%)`, and appends `, doc <path>` when a workflow document was given.
 - The `/workflow-capture` command and the `workflow-start` skill carry YAML frontmatter (`description`,
   and `argument-hint` on the skill, which takes arguments).
 
