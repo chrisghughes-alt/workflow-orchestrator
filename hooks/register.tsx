@@ -56,7 +56,7 @@ function nudgeText(percent: number, runFolder: string): string {
   return (
     `[HR] Context used ${Math.round(percent)}%. Write the orchestrator handoff to ${runFolder}\\handoffs\\orchestrator-handoff-YYYYMMDD-HHMM.md ` +
     `(use the clock for the stamp), update ${runFolder}\\orchestrator-state.md, do whatever your workflow document ` +
-    'requires at a handoff, then end your turn.'
+    'requires at a handoff, then end your turn. The handoff ends with a section headed "Next three actions".'
   )
 }
 

@@ -234,7 +234,7 @@ const PLACEHOLDER = `${DEFAULT_RUN}\\handoffs\\.keep`
 const NUDGE_55 =
   `[HR] Context used 55%. Write the orchestrator handoff to ${RUN}\\handoffs\\orchestrator-handoff-YYYYMMDD-HHMM.md ` +
   `(use the clock for the stamp), update ${RUN}\\orchestrator-state.md, do whatever your workflow document requires ` +
-  'at a handoff, then end your turn.'
+  'at a handoff, then end your turn. The handoff ends with a section headed "Next three actions".'
 
 // A workflow document whose path holds a space, as a Windows path often does.
 const DOC = 'C:\\Docs\\My Workflow.md'
