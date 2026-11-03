@@ -497,11 +497,12 @@ export const register: Register = on => {
     await $.command
       .register({
         name: HR_WATCH,
-        description: 'Arm the context watch: nudge a handoff at the threshold, then clear and resume',
-        argumentHint: '<run-folder> [nudge|auto] [threshold] [mode=…] [threshold=…] [doc=<workflow doc path>]',
+        description:
+          "Watch the main session's context use once a second; at the threshold, ask for a hand-off file. No arguments needed",
+        argumentHint: '[folder] [nudge|auto] [key=value …]',
       })
       .catch(() => undefined)
-    await $.command.register({ name: HR_OFF, description: 'Disarm the context watch' }).catch(() => undefined)
+    await $.command.register({ name: HR_OFF, description: 'Turn the context watch off' }).catch(() => undefined)
     // The pane is not opened here: the poll opens it when the first background
     // agent appears, and /agent-sidebar opens it any time.
     // A failed registration costs the model the tool, never the sidebar its poll.
@@ -518,14 +519,30 @@ export const register: Register = on => {
       .register({
         name: 'hr_watch',
         description:
-          'Arm the context watch for this session: nudge for a handoff at the threshold (percent of context used, 1 to 100, default 50), then (mode auto) clear and resume, or (mode nudge, the default) wait for the owner. Pass the absolute run folder, and optionally workflowDoc, the absolute path of the workflow document the successor reads on resume; without it the resume prompt points at the run-state file\'s "how to resume" section.',
+          "Turn on the context watch. It reads the main session's context gauge once a second. When the share used reaches the threshold, it asks you, once, to write a hand-off file. In nudge mode (the default) it then waits for the person to run /clear; in auto mode it clears and sends the resume prompt by itself. Every argument is optional; paths must be absolute.",
         inputSchema: {
           type: 'object',
           properties: {
-            runFolder: { type: 'string' },
-            mode: { type: 'string', enum: ['nudge', 'auto'] },
-            threshold: { type: 'integer', minimum: 1, maximum: 100 },
-            workflowDoc: { type: 'string' },
+            runFolder: {
+              type: 'string',
+              description:
+                'Where the hand-off lands (the plugin looks there only to see the hand-off file appear); default <repo>/.runs/hr',
+            },
+            mode: {
+              type: 'string',
+              enum: ['nudge', 'auto'],
+              description: 'nudge waits for you to /clear; auto clears and resumes by itself',
+            },
+            threshold: {
+              type: 'integer',
+              minimum: 1,
+              maximum: 100,
+              description: 'percent of context used, 1 to 100, default 50',
+            },
+            workflowDoc: {
+              type: 'string',
+              description: 'a document the new context should read after the hand-off; optional',
+            },
           },
         },
       })
@@ -533,7 +550,7 @@ export const register: Register = on => {
     await $.tool
       .register({
         name: 'hr_off',
-        description: 'Disarm the context watch.',
+        description: 'Turn the context watch off.',
         inputSchema: { type: 'object', properties: {} },
       })
       .catch(() => undefined)

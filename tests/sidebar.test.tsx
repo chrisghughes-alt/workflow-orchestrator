@@ -397,12 +397,29 @@ test('the model arms and disarms the watch through the hr_watch and hr_off tools
   expect(byName.hr_watch!.inputSchema).toEqual({
     type: 'object',
     properties: {
-      runFolder: { type: 'string' },
-      mode: { type: 'string', enum: ['nudge', 'auto'] },
-      threshold: { type: 'integer', minimum: 1, maximum: 100 },
-      workflowDoc: { type: 'string' },
+      runFolder: {
+        type: 'string',
+        description:
+          'Where the hand-off lands (the plugin looks there only to see the hand-off file appear); default <repo>/.runs/hr',
+      },
+      mode: {
+        type: 'string',
+        enum: ['nudge', 'auto'],
+        description: 'nudge waits for you to /clear; auto clears and resumes by itself',
+      },
+      threshold: {
+        type: 'integer',
+        minimum: 1,
+        maximum: 100,
+        description: 'percent of context used, 1 to 100, default 50',
+      },
+      workflowDoc: {
+        type: 'string',
+        description: 'a document the new context should read after the hand-off; optional',
+      },
     },
   })
+  expect(byName.hr_off!.description).toBe('Turn the context watch off.')
   expect(byName.hr_off!.inputSchema).toEqual({ type: 'object', properties: {} })
 
   // A missing folder is refused with the command's own words.
