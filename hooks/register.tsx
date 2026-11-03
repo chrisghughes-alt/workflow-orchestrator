@@ -214,6 +214,19 @@ function watchArgs(args: string): WatchArgs {
   return out
 }
 
+const MAX_PATH_CHARS = 1024
+
+// A path the watch may put into the prompts it submits: absolute (a drive
+// letter and colon, or a leading slash), not over MAX_PATH_CHARS, and free of
+// control characters, so a newline cannot start a new instruction in a prompt.
+function isSafePath(path: string): boolean {
+  return path.length <= MAX_PATH_CHARS && /^([A-Za-z]:|[\\/])/.test(path) && !/[\u0000-\u001f\u007f]/.test(path)
+}
+
+function unsafePathText(field: 'runFolder' | 'workflowDoc'): string {
+  return `HR: ${field} must be an absolute path without control characters`
+}
+
 // A threshold the watch accepts: a whole percent from 1 to 100.
 function isThreshold(value: unknown): value is number {
   return typeof value === 'number' && Number.isInteger(value) && value >= 1 && value <= 100
@@ -231,7 +244,9 @@ function armedText(path: string, state: Hr): string {
 
 // Arms the context watch on a run folder that exists, in nudge mode unless
 // auto is asked for and /clear is enabled, at the given threshold or the
-// default, with the workflow document if one is given. Arming it again on the
+// default, with the workflow document if one is given. Both paths must be
+// absolute and free of control characters, and both must exist; a refusal
+// leaves the watch as it was. Arming it again on the
 // same folder, mode, threshold and document (or none given) leaves it where it
 // is (armed, or mid-nudge); from ready it re-arms.
 // Returns the reply shown to whoever asked.
@@ -251,8 +266,13 @@ async function armWatch(
   if (workflowDoc !== undefined && typeof workflowDoc !== 'string') return 'HR: workflowDoc must be a path'
   // An empty doc reads as none given.
   const doc = typeof workflowDoc === 'string' && workflowDoc.trim() !== '' ? workflowDoc.trim() : undefined
+  // Both paths go into the nudge and resume prompts, so both are checked
+  // before anything is stored.
+  if (!isSafePath(path)) return unsafePathText('runFolder')
+  if (doc !== undefined && !isSafePath(doc)) return unsafePathText('workflowDoc')
   const exists = await $.fs.exists(path).catch(() => false)
   if (!exists) return `HR: no folder at ${path}. The watch stays off.`
+  if (doc !== undefined && !(await $.fs.exists(doc).catch(() => false))) return `HR: no file at ${doc}`
   const wanted: HrMode = mode === 'auto' && CLEAR_ENABLED ? 'auto' : 'nudge'
   let stored: Hr | undefined
   await update($, hr, (cur: Hr) => {
