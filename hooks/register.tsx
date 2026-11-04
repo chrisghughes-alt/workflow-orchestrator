@@ -277,7 +277,8 @@ function isOn(state: Hr): boolean {
 
 // Changes a watch that is on, in place: the mode, threshold or document given,
 // nothing else. Its folder, its place in a handoff and its wait for the context
-// to drop all stay. A nudge-mode resume waiting for the person's /clear takes
+// to drop all stay, but for one step: a watch waiting for the person's /clear
+// that is switched to auto clears and resumes by itself. A nudge-mode resume waiting for the person's /clear takes
 // the new settings too, so the successor is told to arm what the person chose.
 // The arguments arrive already checked by armWatch, all but the document's
 // presence on disk.
@@ -300,11 +301,17 @@ async function changeWatch(
     stored = undefined
     // Turned off, or re-pointed, since it was read: leave it as it now is.
     if (!isOn(cur) || cur.runFolder !== path) return cur
-    stored = { ...cur, ...asked }
+    const changed: Hr = { ...cur, ...asked }
+    // Waiting for the person's /clear and now in auto mode: the next poll
+    // clears and resumes, as auto mode would have once the handoff was seen.
+    stored = changed.phase === 'ready' && modeOf(changed) === 'auto' ? { ...changed, phase: 'clearing' } : changed
     return stored
   })
   if (stored === undefined) return 'HR: the watch changed while this ran. It is unchanged; try again.'
-  if (pendingResume !== undefined) pendingResume = { ...pendingResume, ...asked }
+  // The plugin's own clear sends the resume prompt, so the one waiting for the
+  // person's clear is dropped; kept, the clear would send it a second time.
+  if (stored.phase === 'clearing') pendingResume = undefined
+  else if (pendingResume !== undefined) pendingResume = { ...pendingResume, ...asked }
   if (mode === 'auto' && !CLEAR_ENABLED) return AUTO_DISABLED_TEXT
   return armedText(path, stored)
 }

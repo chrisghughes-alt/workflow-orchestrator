@@ -1142,3 +1142,36 @@ test('a threshold changed while ready reaches the resume prompt after the person
   await clock.advance(1500)
   expect(world.submits).toEqual([NUDGE_55, RESUME_NUDGE('h.md').replace('threshold 50', 'threshold 70')])
 })
+
+test('switching to auto while ready clears and resumes once, without waiting for the person', async ($, on) => {
+  const store = stateStore(on)
+  const { clock, world } = hrEngine(on)
+  // The plugin's own /clear starts the session over, as the person's would.
+  world.onCommand = command => {
+    if (command !== 'clear') return
+    store.forget('workflow-orchestrator')
+    world.startedAt = clock.now()
+  }
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+
+  await $.command.run({ command: 'hr-watch', args: RUN })
+  world.percent = 55
+  await clock.advance(1500)
+  world.handoffs = [{ name: 'h.md', kind: 'file', size: 1, mtimeMs: clock.now(), isLink: false }]
+  await $.turn.complete(mainTurnEnds)
+  await clock.advance(1500)
+  expect(await header($)).toContain('HR ready')
+  expect(world.commands.filter(c => c === 'clear')).toEqual([])
+
+  expect((await $.command.run({ command: 'hr-watch', args: 'auto' })).text).toBe(`HR armed on ${RUN} (auto, 50%)`)
+  await clock.advance(3000)
+  expect(world.commands.filter(c => c === 'clear')).toEqual(['clear'])
+  expect(world.submits.length).toBe(2)
+  expect(world.submits[1]).toContain(`Read ${RUN}\\handoffs\\h.md`)
+  expect(world.submits[1]).toContain(`runFolder ${RUN}, mode auto, threshold 50, then`)
+  expect(await header($)).toContain('HR auto ·')
+
+  // The resume that waited for the person's clear is not sent as well.
+  await clock.advance(5000)
+  expect(world.submits.length).toBe(2)
+})
