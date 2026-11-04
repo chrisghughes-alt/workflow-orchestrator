@@ -269,10 +269,55 @@ async function defaultRunFolder($: Dollar): Promise<string> {
   return folder
 }
 
+// Whether a watch is on: armed, or anywhere in a handoff (nudged, ready,
+// clearing), with a run folder to watch.
+function isOn(state: Hr): boolean {
+  return state.phase !== 'off' && state.runFolder !== ''
+}
+
+// Changes a watch that is on, in place: the mode, threshold or document given,
+// nothing else. Its folder, its place in a handoff and its wait for the context
+// to drop all stay. A nudge-mode resume waiting for the person's /clear takes
+// the new settings too, so the successor is told to arm what the person chose.
+// The arguments arrive already checked by armWatch, all but the document's
+// presence on disk.
+async function changeWatch(
+  $: Dollar,
+  path: string,
+  mode: string | undefined,
+  threshold: unknown,
+  doc: string | undefined,
+): Promise<string> {
+  if (doc !== undefined && !(await $.fs.exists(doc).catch(() => false))) return `HR: no file at ${doc}`
+  const wanted: HrMode | undefined = mode === undefined ? undefined : mode === 'auto' && CLEAR_ENABLED ? 'auto' : 'nudge'
+  const asked: Partial<Hr> = {
+    ...(wanted === undefined ? {} : { mode: wanted }),
+    ...(isThreshold(threshold) ? { threshold } : {}),
+    ...(doc === undefined ? {} : { workflowDoc: doc }),
+  }
+  let stored: Hr | undefined
+  await update($, hr, (cur: Hr) => {
+    stored = undefined
+    // Turned off, or re-pointed, since it was read: leave it as it now is.
+    if (!isOn(cur) || cur.runFolder !== path) return cur
+    stored = { ...cur, ...asked }
+    return stored
+  })
+  if (stored === undefined) return 'HR: the watch changed while this ran. It is unchanged; try again.'
+  if (pendingResume !== undefined) pendingResume = { ...pendingResume, ...asked }
+  if (mode === 'auto' && !CLEAR_ENABLED) return AUTO_DISABLED_TEXT
+  return armedText(path, stored)
+}
+
 // Arms the context watch on a run folder that exists, in nudge mode unless
 // auto is asked for and /clear is enabled, at the given threshold or the
 // default, with the workflow document if one is given. With no run folder
-// given it arms on the default one, creating it if need be. Both paths must be
+// given and a watch already on, it keeps that watch's folder and document and
+// changes only the mode, threshold or document given, leaving the watch where
+// it is in a handoff: a person who types `/hr-watch auto` mid-run means "this
+// run, now in auto mode", and a reset to armed would nudge a second time while
+// the context is still over the line. With no run folder given and no watch
+// on, it arms on the default folder, creating it if need be. Both paths must be
 // absolute and free of control characters, and both must exist; a refusal
 // leaves the watch as it was. Arming it again on the
 // same folder, mode, threshold and document (or none given) leaves it where it
@@ -296,6 +341,10 @@ async function armWatch(
   // made, so a refused call leaves nothing new on disk.
   if (doc !== undefined && !isSafePath(doc)) return unsafePathText('workflowDoc')
   let path = runFolder.trim()
+  const before = path === '' ? await read($, hr) : undefined
+  if (before !== undefined && isOn(before)) {
+    return changeWatch($, before.runFolder, mode, threshold, doc)
+  }
   if (path === '') {
     try {
       path = await defaultRunFolder($)
@@ -537,7 +586,7 @@ export const register: Register = on => {
             runFolder: {
               type: 'string',
               description:
-                'Where the hand-off lands (the plugin looks there only to see the hand-off file appear); default <repo>/.runs/hr',
+                'Where the hand-off lands (the plugin looks there only to see the hand-off file appear). Left out while a watch is on: that watch keeps its folder and only the other arguments given change. Left out with no watch on: <repo>/.runs/hr',
             },
             mode: {
               type: 'string',
