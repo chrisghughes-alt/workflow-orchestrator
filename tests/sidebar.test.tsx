@@ -1,4 +1,6 @@
 import { expect, mock, test } from 'claude-code/testing'
+import type { TestBody } from 'claude-code/testing'
+import type { AgentInfo } from 'claude-code'
 
 import { finishClear, seeHandoff } from '../hooks/register'
 import type { Hr } from '../types'
@@ -46,7 +48,7 @@ test('a spawned agent shows its model, activity and tokens', async ($, on) => {
     return { result: {} }
   })
 
-  await $.agent.spawn({ prompt: 'look around', description: 'Survey the repo' })
+  await $.agent.spawn({ prompt: 'look around', description: 'Survey the repo' } as never)
   for await (const _ of $.turn.step({ turnId: 't1', index: 0, model: 'claude-opus-5-5', messageCount: 1, agentId: 'a1' } as never)) {
     // drain
   }
@@ -120,7 +122,7 @@ test('the header says ? when the context share is not known yet', async ($, on) 
 
 test('an agent with no activity for over ten minutes is marked silent, a done one never', async ($, on) => {
   const clock = mock.clock(on)
-  let list = [{ id: 'a1', description: 'Survey the repo', type: 'Explore', status: 'running' }]
+  let list: AgentInfo[] = [{ id: 'a1', description: 'Survey the repo', type: 'Explore', status: 'running' }]
   on('agent.list', () => ({ value: list }))
   on('session.usage', () => usage(10))
   on('command.register', (_, e) => ({ value: { command: e.name } }))
@@ -168,7 +170,7 @@ test('the model can read the sidebar as JSON through the agents tool', async ($,
   const roster = registered.find(t => t.name === 'agents')
   expect(roster?.inputSchema).toEqual({ type: 'object', properties: {} })
 
-  await $.agent.spawn({ prompt: 'look around', description: 'Survey the repo' })
+  await $.agent.spawn({ prompt: 'look around', description: 'Survey the repo' } as never)
   await clock.advance(1500)
 
   const r = await $.tool.call({ tool: 'mcp__workflow-orchestrator__agents' } as never)
@@ -214,7 +216,7 @@ test('an agent whose step read a context window shows how full it is', async ($,
     }
   })
 
-  await $.agent.spawn({ prompt: 'look around', description: 'Survey the repo' })
+  await $.agent.spawn({ prompt: 'look around', description: 'Survey the repo' } as never)
   for await (const _ of $.turn.step({ turnId: 't1', index: 0, model: 'claude-sonnet-5-5', messageCount: 1, agentId: 'a1' } as never)) {
     // drain
   }
@@ -249,7 +251,7 @@ type Fs = { name: string; kind: 'file' | 'dir' | 'other'; size: number; mtimeMs:
 
 // Stands in for the engine under the context watch: a run folder that exists,
 // a gauge the test sets, and a record of every prompt, command and toast.
-function hrEngine(on: Parameters<Parameters<typeof test>[1]>[1]) {
+function hrEngine(on: Parameters<TestBody>[1]) {
   const clock = mock.clock(on)
   const world = {
     percent: 10 as number | undefined,
@@ -305,7 +307,7 @@ function hrEngine(on: Parameters<Parameters<typeof test>[1]>[1]) {
   return { clock, world }
 }
 
-async function header($: Parameters<Parameters<typeof test>[1]>[0]) {
+async function header($: Parameters<TestBody>[0]) {
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
   const text = (await ui.find({ type: 'Text', text: /running/ }))?.text ?? ''
   await ui.unmount()
@@ -318,7 +320,7 @@ test('/hr-watch on a missing folder stays off', async ($, on) => {
   const { clock } = hrEngine(on)
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
 
-  const r = await $.command.run({ command: 'hr-watch', args: 'C:/runs/nope' })
+  const r = await $.command.run({ command: 'hr-watch', args: 'C:/runs/nope' } as never)
   expect(r.text).toContain('C:/runs/nope')
   await clock.advance(1500)
   expect(await header($)).not.toContain('HR')
@@ -346,7 +348,7 @@ test('/hr-watch alone arms the default folder with the defaults', async ($, on) 
   const { clock, world } = hrEngine(on)
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
 
-  expect((await $.command.run({ command: 'hr-watch', args: '' })).text).toBe(`HR armed on ${DEFAULT_RUN} (nudge, 50%)`)
+  expect((await $.command.run({ command: 'hr-watch', args: '' } as never)).text).toBe(`HR armed on ${DEFAULT_RUN} (nudge, 50%)`)
   expect(world.written).toEqual([PLACEHOLDER])
   await clock.advance(1500)
   expect(await header($)).toContain('HR nudge ·')
@@ -356,20 +358,20 @@ test('/hr-watch auto arms the default folder in auto mode', async ($, on) => {
   const { clock } = hrEngine(on)
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
 
-  expect((await $.command.run({ command: 'hr-watch', args: 'auto' })).text).toBe(`HR armed on ${DEFAULT_RUN} (auto, 50%)`)
+  expect((await $.command.run({ command: 'hr-watch', args: 'auto' } as never)).text).toBe(`HR armed on ${DEFAULT_RUN} (auto, 50%)`)
   await clock.advance(1500)
   expect(await header($)).toContain('HR auto ·')
   // The options that may follow a folder may follow the mode word as well.
-  await $.command.run({ command: 'hr-off', args: '' })
-  expect((await $.command.run({ command: 'hr-watch', args: 'auto 5' })).text).toBe(`HR armed on ${DEFAULT_RUN} (auto, 5%)`)
+  await $.command.run({ command: 'hr-off', args: '' } as never)
+  expect((await $.command.run({ command: 'hr-watch', args: 'auto 5' } as never)).text).toBe(`HR armed on ${DEFAULT_RUN} (auto, 5%)`)
 })
 
 test('an explicit folder still arms there and creates nothing', async ($, on) => {
   const { world } = hrEngine(on)
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
 
-  expect((await $.command.run({ command: 'hr-watch', args: `${RUN} auto` })).text).toBe(`HR armed on ${RUN} (auto, 50%)`)
-  await $.command.run({ command: 'hr-off', args: '' })
+  expect((await $.command.run({ command: 'hr-watch', args: `${RUN} auto` } as never)).text).toBe(`HR armed on ${RUN} (auto, 50%)`)
+  await $.command.run({ command: 'hr-off', args: '' } as never)
   expect((await $.tool.call({ tool: 'mcp__workflow-orchestrator__hr_watch', runFolder: RUN } as never)).result).toBe(
     `HR armed on ${RUN} (nudge, 50%)`,
   )
@@ -380,12 +382,12 @@ test('/hr-watch with a mode word: nudge arms in nudge, auto arms in auto', async
   const { clock } = hrEngine(on)
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
 
-  expect((await $.command.run({ command: 'hr-watch', args: `${RUN} nudge` })).text).toBe(`HR armed on ${RUN} (nudge, 50%)`)
+  expect((await $.command.run({ command: 'hr-watch', args: `${RUN} nudge` } as never)).text).toBe(`HR armed on ${RUN} (nudge, 50%)`)
   await clock.advance(1500)
   expect(await header($)).toContain('HR nudge ·')
 
-  await $.command.run({ command: 'hr-off', args: '' })
-  const auto = await $.command.run({ command: 'hr-watch', args: `${RUN} auto` })
+  await $.command.run({ command: 'hr-off', args: '' } as never)
+  const auto = await $.command.run({ command: 'hr-watch', args: `${RUN} auto` } as never)
   expect(auto.text).toBe(`HR armed on ${RUN} (auto, 50%)`)
   await clock.advance(1500)
   expect(await header($)).toContain('HR auto ·')
@@ -403,7 +405,7 @@ test('the model arms and disarms the watch through the hr_watch and hr_off tools
       runFolder: {
         type: 'string',
         description:
-          'Where the hand-off lands (the plugin looks there only to see the hand-off file appear); default <repo>/.runs/hr',
+          'Where the hand-off lands (the plugin looks there only to see the hand-off file appear). Left out while a watch is on: that watch keeps its folder and only the other arguments given change. Left out with no watch on: <repo>/.runs/hr',
       },
       mode: {
         type: 'string',
@@ -427,7 +429,7 @@ test('the model arms and disarms the watch through the hr_watch and hr_off tools
 
   // A missing folder is refused with the command's own words.
   const refused = await $.tool.call({ tool: 'mcp__workflow-orchestrator__hr_watch', runFolder: 'C:/runs/nope' } as never)
-  const typed = await $.command.run({ command: 'hr-watch', args: 'C:/runs/nope' })
+  const typed = await $.command.run({ command: 'hr-watch', args: 'C:/runs/nope' } as never)
   expect(refused.result).toBe(typed.text)
   await clock.advance(1500)
   expect(await header($)).not.toContain('HR')
@@ -488,14 +490,14 @@ test('/hr-watch reads a threshold as the word after the mode', async ($, on) => 
   world.percent = 2
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
 
-  expect((await $.command.run({ command: 'hr-watch', args: `${RUN} auto 5` })).text).toBe(`HR armed on ${RUN} (auto, 5%)`)
+  expect((await $.command.run({ command: 'hr-watch', args: `${RUN} auto 5` } as never)).text).toBe(`HR armed on ${RUN} (auto, 5%)`)
   // Arming again the same way changes nothing and says so the same way.
-  expect((await $.command.run({ command: 'hr-watch', args: `${RUN} auto 5` })).text).toBe(`HR armed on ${RUN} (auto, 5%)`)
+  expect((await $.command.run({ command: 'hr-watch', args: `${RUN} auto 5` } as never)).text).toBe(`HR armed on ${RUN} (auto, 5%)`)
   await clock.advance(1500)
   expect(await header($)).toContain('HR auto ·')
 
   for (const word of ['abc', '0', '101', '5.5']) {
-    expect((await $.command.run({ command: 'hr-watch', args: `${RUN} nudge ${word}` })).text).toBe(THRESHOLD_REFUSED)
+    expect((await $.command.run({ command: 'hr-watch', args: `${RUN} nudge ${word}` } as never)).text).toBe(THRESHOLD_REFUSED)
   }
   await clock.advance(1500)
   expect(await header($)).toContain('HR auto ·')
@@ -506,10 +508,10 @@ test('/hr-watch reads a threshold as the word after the mode', async ($, on) => 
   expect(world.submits[0]).toContain('[HR] Context used 6%.')
 
   // Off, then armed with no threshold: back to the default.
-  await $.command.run({ command: 'hr-off', args: '' })
-  expect((await $.command.run({ command: 'hr-watch', args: `${RUN} nudge 5` })).text).toBe(`HR armed on ${RUN} (nudge, 5%)`)
-  await $.command.run({ command: 'hr-off', args: '' })
-  expect((await $.command.run({ command: 'hr-watch', args: RUN })).text).toBe(`HR armed on ${RUN} (nudge, 50%)`)
+  await $.command.run({ command: 'hr-off', args: '' } as never)
+  expect((await $.command.run({ command: 'hr-watch', args: `${RUN} nudge 5` } as never)).text).toBe(`HR armed on ${RUN} (nudge, 5%)`)
+  await $.command.run({ command: 'hr-off', args: '' } as never)
+  expect((await $.command.run({ command: 'hr-watch', args: RUN } as never)).text).toBe(`HR armed on ${RUN} (nudge, 50%)`)
 })
 
 test('hr_watch keeps a workflowDoc and the resume prompt hands it to the successor', async ($, on) => {
@@ -568,7 +570,7 @@ test('hr_watch refuses paths that are relative, missing, or carry control charac
   for (const runFolder of ['runs\\r1', `${RUN}\nnext line`, `C:\\${'a'.repeat(1030)}`]) {
     expect(await watch({ runFolder })).toBe(badRun)
   }
-  expect((await $.command.run({ command: 'hr-watch', args: 'runs/r1 auto' })).text).toBe(badRun)
+  expect((await $.command.run({ command: 'hr-watch', args: 'runs/r1 auto' } as never)).text).toBe(badRun)
   // A workflow document that is not on disk.
   expect(await watch({ runFolder: RUN, workflowDoc: 'C:\\Docs\\gone.md' })).toBe('HR: no file at C:\\Docs\\gone.md')
 
@@ -583,13 +585,13 @@ test('/hr-watch reads key=value options, a doc path with spaces last, and refuse
   world.percent = 2
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
 
-  const run = (args: string) => $.command.run({ command: 'hr-watch', args }).then(r => r.text)
+  const run = (args: string) => $.command.run({ command: 'hr-watch', args } as never).then(r => r.text)
 
   expect(await run(`${RUN} mode=auto threshold=5 doc=${DOC}`)).toBe(`HR armed on ${RUN} (auto, 5%, doc ${DOC})`)
-  await $.command.run({ command: 'hr-off', args: '' })
+  await $.command.run({ command: 'hr-off', args: '' } as never)
   // The bare mode word and the bare threshold after it still work beside a doc.
   expect(await run(`${RUN} auto 5 doc=${DOC}`)).toBe(`HR armed on ${RUN} (auto, 5%, doc ${DOC})`)
-  await $.command.run({ command: 'hr-off', args: '' })
+  await $.command.run({ command: 'hr-off', args: '' } as never)
   // A doc with no space may come before the other options.
   expect(await run(`${RUN} doc=C:\\Docs\\flow.md mode=nudge threshold=7`)).toBe(
     `HR armed on ${RUN} (nudge, 7%, doc C:\\Docs\\flow.md)`,
@@ -603,7 +605,7 @@ test('/hr-watch reads key=value options, a doc path with spaces last, and refuse
   expect(await header($)).toContain('HR nudge ·')
 
   // The doc travels to the resume prompt.
-  await $.command.run({ command: 'hr-off', args: '' })
+  await $.command.run({ command: 'hr-off', args: '' } as never)
   expect(await run(`${RUN} auto 5 doc=${DOC}`)).toBe(`HR armed on ${RUN} (auto, 5%, doc ${DOC})`)
   world.percent = 6
   await clock.advance(1500)
@@ -617,10 +619,10 @@ test('the watch nudges once at the threshold, then waits for a new handoff file'
   const { clock, world } = hrEngine(on)
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
 
-  const r = await $.command.run({ command: 'hr-watch', args: RUN })
+  const r = await $.command.run({ command: 'hr-watch', args: RUN } as never)
   expect(r.text).toBe(`HR armed on ${RUN} (nudge, 50%)`)
   // Arming again changes nothing.
-  expect((await $.command.run({ command: 'hr-watch', args: RUN })).text).toBe(`HR armed on ${RUN} (nudge, 50%)`)
+  expect((await $.command.run({ command: 'hr-watch', args: RUN } as never)).text).toBe(`HR armed on ${RUN} (nudge, 50%)`)
   await clock.advance(1500)
   // No mode word: nudge mode, shown as the mode while armed.
   expect(await header($)).toContain('ctx used 10% · HR nudge · 0 running')
@@ -668,7 +670,7 @@ test('the watch nudges once at the threshold, then waits for a new handoff file'
 
   // /hr-watch again re-arms. Still over the threshold, so no nudge until the
   // gauge has dropped below it and climbed back.
-  expect((await $.command.run({ command: 'hr-watch', args: RUN })).text).toBe(`HR armed on ${RUN} (nudge, 50%)`)
+  expect((await $.command.run({ command: 'hr-watch', args: RUN } as never)).text).toBe(`HR armed on ${RUN} (nudge, 50%)`)
   await clock.advance(3000)
   expect(await header($)).toContain('HR nudge ·')
   expect(world.submits.length).toBe(1)
@@ -681,7 +683,7 @@ test('the watch nudges once at the threshold, then waits for a new handoff file'
   expect(world.submits[1]).toContain('[HR] Context used 60%.')
 
   // Off.
-  expect((await $.command.run({ command: 'hr-off', args: '' })).text).toBe('HR off')
+  expect((await $.command.run({ command: 'hr-off', args: '' } as never)).text).toBe('HR off')
   await clock.advance(1500)
   expect(await header($)).not.toContain('HR')
 })
@@ -745,7 +747,7 @@ test('in auto mode with /clear enabled, a seen handoff clears and then hands the
 
 // Stands in for the engine's value store, so a test can do what a live /clear
 // does to the plugin: forget every value it stored.
-function stateStore(on: Parameters<Parameters<typeof test>[1]>[1]) {
+function stateStore(on: Parameters<TestBody>[1]) {
   const values = new Map<string, unknown>()
   const versions = new Map<string, number>()
   // Set it to make the next write throw once, as a store that is briefly down would.
@@ -790,7 +792,7 @@ test('in auto mode the watch clears, resumes and re-arms, though the clear wipes
   }
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
 
-  expect((await $.command.run({ command: 'hr-watch', args: `${RUN} auto` })).text).toBe(`HR armed on ${RUN} (auto, 50%)`)
+  expect((await $.command.run({ command: 'hr-watch', args: `${RUN} auto` } as never)).text).toBe(`HR armed on ${RUN} (auto, 50%)`)
   await clock.advance(1500)
   expect(await header($)).toContain('HR auto ·')
 
@@ -829,11 +831,11 @@ test('/hr-off during a clear keeps the watch off afterwards', async ($, on) => {
     if (command !== 'clear') return
     store.forget('workflow-orchestrator')
     // The owner turns the watch off while the clear is in flight.
-    await $.command.run({ command: 'hr-off', args: '' })
+    await $.command.run({ command: 'hr-off', args: '' } as never)
   }
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
 
-  await $.command.run({ command: 'hr-watch', args: `${RUN} auto` })
+  await $.command.run({ command: 'hr-watch', args: `${RUN} auto` } as never)
   world.percent = 55
   await clock.advance(1500)
   world.handoffs = [{ name: 'h.md', kind: 'file', size: 1, mtimeMs: clock.now(), isLink: false }]
@@ -856,7 +858,7 @@ test('in nudge mode, the person running /clear after the handoff gets the resume
   const { clock, world } = hrEngine(on)
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
 
-  expect((await $.command.run({ command: 'hr-watch', args: RUN })).text).toBe(`HR armed on ${RUN} (nudge, 50%)`)
+  expect((await $.command.run({ command: 'hr-watch', args: RUN } as never)).text).toBe(`HR armed on ${RUN} (nudge, 50%)`)
   world.percent = 55
   await clock.advance(1500)
   expect(world.submits).toEqual([NUDGE_55])
@@ -885,7 +887,7 @@ test('in nudge mode, /hr-off while ready means a later /clear sends no resume pr
   const { clock, world } = hrEngine(on)
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
 
-  await $.command.run({ command: 'hr-watch', args: RUN })
+  await $.command.run({ command: 'hr-watch', args: RUN } as never)
   world.percent = 55
   await clock.advance(1500)
   world.handoffs = [{ name: 'h.md', kind: 'file', size: 1, mtimeMs: clock.now(), isLink: false }]
@@ -893,7 +895,7 @@ test('in nudge mode, /hr-off while ready means a later /clear sends no resume pr
   await clock.advance(1500)
   expect(await header($)).toContain('HR ready')
 
-  expect((await $.command.run({ command: 'hr-off', args: '' })).text).toBe('HR off')
+  expect((await $.command.run({ command: 'hr-off', args: '' } as never)).text).toBe('HR off')
   store.forget('workflow-orchestrator')
   world.startedAt = clock.now()
   await clock.advance(3000)
@@ -924,7 +926,7 @@ test('a second session start, as /clear may raise, leaves one poll running, not 
 
 test('the Agents pane opens once, unfocused, when the first background agent appears', async ($, on) => {
   const clock = mock.clock(on)
-  let list: { id: string; description: string; type: string; status: string }[] = []
+  let list: AgentInfo[] = []
   on('agent.list', () => ({ value: list }))
   on('session.usage', () => usage(10))
   on('command.register', (_, e) => ({ value: { command: e.name } }))
@@ -958,7 +960,7 @@ test('the Agents pane opens once, unfocused, when the first background agent app
   expect(opens.length).toBe(1)
 
   // The command still opens it, with focus.
-  const r = await $.command.run({ command: 'agent-sidebar' })
+  const r = await $.command.run({ command: 'agent-sidebar' } as never)
   expect(r.text).toBe('Agents sidebar opened.')
   expect(opens.length).toBe(2)
   expect(opens[1]!.focus).toBe(true)
@@ -966,7 +968,7 @@ test('the Agents pane opens once, unfocused, when the first background agent app
 
 test('a finished agent leaves the sidebar once the engine stops listing it', async ($, on) => {
   const clock = mock.clock(on)
-  let list: { id: string; description: string; type: string; status: string }[] = [
+  let list: AgentInfo[] = [
     { id: 'a1', description: 'Survey the repo', type: 'Explore', status: 'running' },
   ]
   on('agent.list', () => ({ value: list }))
@@ -1024,9 +1026,154 @@ test('an agent spawns once, and its result comes back, when recording its model 
     return { model: 'claude-opus-5-5', agentId: 'a1' }
   })
 
-  const r = await $.agent.spawn({ prompt: 'look around', description: 'Survey the repo' })
+  const r = await $.agent.spawn({ prompt: 'look around', description: 'Survey the repo' } as never)
 
   expect(store.control.failures).toBe(1)
   expect(spawns).toBe(1)
   expect(r.agentId).toBe('a1')
+})
+
+test('a bare /hr-watch on a running watch keeps its folder and document and changes only the mode', async ($, on) => {
+  const { clock, world } = hrEngine(on)
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+
+  const armed = await $.tool.call({ tool: 'mcp__workflow-orchestrator__hr_watch', runFolder: RUN, workflowDoc: DOC } as never)
+  expect(armed.result).toBe(`HR armed on ${RUN} (nudge, 50%, doc ${DOC})`)
+
+  expect((await $.command.run({ command: 'hr-watch', args: 'auto' } as never)).text).toBe(`HR armed on ${RUN} (auto, 50%, doc ${DOC})`)
+  await clock.advance(1500)
+  expect(await header($)).toContain('HR auto ·')
+  // The default folder was never made.
+  expect(world.written).toEqual([])
+
+  // The tool with no folder does the same.
+  const back = await $.tool.call({ tool: 'mcp__workflow-orchestrator__hr_watch', mode: 'nudge' } as never)
+  expect(back.result).toBe(`HR armed on ${RUN} (nudge, 50%, doc ${DOC})`)
+  expect(world.written).toEqual([])
+})
+
+test('a bare /hr-watch with only a threshold changes the threshold and keeps the mode', async ($, on) => {
+  const { world } = hrEngine(on)
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+
+  expect((await $.command.run({ command: 'hr-watch', args: `${RUN} auto 40` } as never)).text).toBe(`HR armed on ${RUN} (auto, 40%)`)
+  expect((await $.command.run({ command: 'hr-watch', args: 'threshold=70' } as never)).text).toBe(`HR armed on ${RUN} (auto, 70%)`)
+  // Nothing given at all leaves it as it is.
+  expect((await $.command.run({ command: 'hr-watch', args: '' } as never)).text).toBe(`HR armed on ${RUN} (auto, 70%)`)
+  // A bad value is refused and the watch is unchanged.
+  expect((await $.command.run({ command: 'hr-watch', args: 'threshold=0' } as never)).text).toBe(
+    'HR: threshold must be a whole number from 1 to 100',
+  )
+  expect((await $.command.run({ command: 'hr-watch', args: '' } as never)).text).toBe(`HR armed on ${RUN} (auto, 70%)`)
+  expect(world.written).toEqual([])
+})
+
+test('a folder given on a running watch still re-points it', async ($, on) => {
+  const { world } = hrEngine(on)
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+
+  // Armed on the default folder before a run's kickoff names the real one.
+  expect((await $.command.run({ command: 'hr-watch', args: '' } as never)).text).toBe(`HR armed on ${DEFAULT_RUN} (nudge, 50%)`)
+  const kickoff = await $.tool.call({ tool: 'mcp__workflow-orchestrator__hr_watch', runFolder: RUN, mode: 'auto' } as never)
+  expect(kickoff.result).toBe(`HR armed on ${RUN} (auto, 50%)`)
+  expect((await $.command.run({ command: 'hr-watch', args: `${DEFAULT_RUN}` } as never)).text).toBe(
+    `HR armed on ${DEFAULT_RUN} (nudge, 50%)`,
+  )
+  expect(world.written).toEqual([PLACEHOLDER])
+})
+
+test('a bare /hr-watch with no watch on uses the defaults, also after /hr-off', async ($, on) => {
+  hrEngine(on)
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+
+  expect((await $.command.run({ command: 'hr-watch', args: `${RUN} auto 40` } as never)).text).toBe(`HR armed on ${RUN} (auto, 40%)`)
+  await $.command.run({ command: 'hr-off', args: '' } as never)
+  expect((await $.command.run({ command: 'hr-watch', args: 'auto' } as never)).text).toBe(`HR armed on ${DEFAULT_RUN} (auto, 50%)`)
+})
+
+test('switching to auto after the nudge keeps the run, does not nudge again, and clears on the handoff', async ($, on) => {
+  const store = stateStore(on)
+  const { clock, world } = hrEngine(on)
+  world.onCommand = command => {
+    if (command === 'clear') store.forget('workflow-orchestrator')
+  }
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+
+  await $.command.run({ command: 'hr-watch', args: RUN } as never)
+  world.percent = 55
+  await clock.advance(1500)
+  expect(world.submits).toEqual([NUDGE_55])
+
+  // The person means "this run, now auto". The watch stays mid-handoff.
+  expect((await $.command.run({ command: 'hr-watch', args: 'auto' } as never)).text).toBe(`HR armed on ${RUN} (auto, 50%)`)
+  await clock.advance(3000)
+  expect(await header($)).toContain('HR nudged')
+  expect(world.submits).toEqual([NUDGE_55])
+
+  // The handoff lands in the run's own folder: auto mode clears and resumes there.
+  world.handoffs = [{ name: 'h.md', kind: 'file', size: 1, mtimeMs: clock.now(), isLink: false }]
+  await $.turn.complete(mainTurnEnds)
+  await clock.advance(3000)
+  expect(world.commands.filter(c => c === 'clear')).toEqual(['clear'])
+  expect(world.submits.length).toBe(2)
+  expect(world.submits[1]).toContain(`Read ${RUN}\\handoffs\\h.md`)
+  expect(world.submits[1]).toContain(`runFolder ${RUN}, mode auto, threshold 50, then`)
+  expect(world.written).toEqual([])
+})
+
+test('a threshold changed while ready reaches the resume prompt after the person clears', async ($, on) => {
+  const store = stateStore(on)
+  const { clock, world } = hrEngine(on)
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+
+  await $.command.run({ command: 'hr-watch', args: RUN } as never)
+  world.percent = 55
+  await clock.advance(1500)
+  world.handoffs = [{ name: 'h.md', kind: 'file', size: 1, mtimeMs: clock.now(), isLink: false }]
+  await $.turn.complete(mainTurnEnds)
+  await clock.advance(1500)
+  expect(await header($)).toContain('HR ready')
+
+  expect((await $.command.run({ command: 'hr-watch', args: 'threshold=70' } as never)).text).toBe(`HR armed on ${RUN} (nudge, 70%)`)
+  // Still ready: the change does not stand in for the person's clear.
+  await clock.advance(1500)
+  expect(await header($)).toContain('HR ready')
+
+  store.forget('workflow-orchestrator')
+  world.startedAt = clock.now()
+  await clock.advance(1500)
+  expect(world.submits).toEqual([NUDGE_55, RESUME_NUDGE('h.md').replace('threshold 50', 'threshold 70')])
+})
+
+test('switching to auto while ready clears and resumes once, without waiting for the person', async ($, on) => {
+  const store = stateStore(on)
+  const { clock, world } = hrEngine(on)
+  // The plugin's own /clear starts the session over, as the person's would.
+  world.onCommand = command => {
+    if (command !== 'clear') return
+    store.forget('workflow-orchestrator')
+    world.startedAt = clock.now()
+  }
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+
+  await $.command.run({ command: 'hr-watch', args: RUN } as never)
+  world.percent = 55
+  await clock.advance(1500)
+  world.handoffs = [{ name: 'h.md', kind: 'file', size: 1, mtimeMs: clock.now(), isLink: false }]
+  await $.turn.complete(mainTurnEnds)
+  await clock.advance(1500)
+  expect(await header($)).toContain('HR ready')
+  expect(world.commands.filter(c => c === 'clear')).toEqual([])
+
+  expect((await $.command.run({ command: 'hr-watch', args: 'auto' } as never)).text).toBe(`HR armed on ${RUN} (auto, 50%)`)
+  await clock.advance(3000)
+  expect(world.commands.filter(c => c === 'clear')).toEqual(['clear'])
+  expect(world.submits.length).toBe(2)
+  expect(world.submits[1]).toContain(`Read ${RUN}\\handoffs\\h.md`)
+  expect(world.submits[1]).toContain(`runFolder ${RUN}, mode auto, threshold 50, then`)
+  expect(await header($)).toContain('HR auto ·')
+
+  // The resume that waited for the person's clear is not sent as well.
+  await clock.advance(5000)
+  expect(world.submits.length).toBe(2)
 })

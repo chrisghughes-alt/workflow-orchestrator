@@ -3,6 +3,17 @@
 All notable changes to this project are documented here. This project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Fixed
+- `/hr-watch` or `hr_watch` with no folder, while a watch is on, keeps that watch's folder and
+  workflow document and changes only the mode, threshold or document given. It no longer re-points
+  the watch at `<repo>/.runs/hr`. The watch also keeps its place in a hand-off, so switching modes
+  after the nudge does not nudge again. A folder given still re-points the watch, and with no watch
+  on a bare call still uses the defaults.
+- A watch waiting for your `/clear` (the hand-off written, nudge mode) that you switch to auto now
+  clears and resumes by itself, once.
+
 ## [2.1.0] — 2026-11-03
 
 ### Added

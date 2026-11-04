@@ -164,9 +164,9 @@ the keyboard and want to read the hand-off first.
 
 | Tool or command | What it does |
 |---|---|
-| `mcp__workflow-orchestrator__hr_watch({ runFolder?, mode?, threshold?, workflowDoc? })` | Arms the watch. `runFolder` is where the hand-off lands, default `<repo>/.runs/hr`. `mode` is `nudge` (default, waits for you to `/clear`) or `auto` (clears and resumes by itself). `threshold` is the percent of context used, a whole number from 1 to 100, default 50. `workflowDoc` is a document the new context should read after the hand-off; optional. |
+| `mcp__workflow-orchestrator__hr_watch({ runFolder?, mode?, threshold?, workflowDoc? })` | Arms the watch. `runFolder` is where the hand-off lands, default `<repo>/.runs/hr`. Left out while a watch is on, the watch keeps its folder and document and only the other arguments given change. `mode` is `nudge` (default, waits for you to `/clear`) or `auto` (clears and resumes by itself). `threshold` is the percent of context used, a whole number from 1 to 100, default 50. `workflowDoc` is a document the new context should read after the hand-off; optional. |
 | `mcp__workflow-orchestrator__hr_off()` | Turns the watch off. |
-| `/hr-watch [<folder>] [nudge\|auto] [key=value …]` | Arms the watch from the prompt. With no arguments it uses the defaults above. The keys are `mode`, `threshold` and `doc`. A bare threshold right after the mode word also works. |
+| `/hr-watch [<folder>] [nudge\|auto] [key=value …]` | Arms the watch from the prompt. With no folder and no watch on, it uses the defaults above. With no folder while a watch is on, it changes only what you typed: `/hr-watch auto` mid-run switches that same run to auto mode. The keys are `mode`, `threshold` and `doc`. A bare threshold right after the mode word also works. |
 | `/hr-off` | Turns the watch off. |
 | `/agent-sidebar` | Opens the Agents pane. |
 

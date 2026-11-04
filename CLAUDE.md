@@ -34,7 +34,10 @@ subscribe to this marketplace, so every push is a release to them.
   never hard-code another project's phases.
 - **Examples stay sanitized.** Private or custom skill names are annotated as examples.
 - **The hooks module is tested.** `claude plugin validate <repo>` and `claude plugin test <repo>` must
-  pass before every commit that touches `hooks/`, `types/` or `tests/`. The folder hot-reloads into
+  pass before every commit that touches `hooks/`, `types/` or `tests/`, and so must the type-check,
+  `tsc -p <repo>`. That reads the type files Claude Code lays in `.claude-plugin/types/` when it loads
+  the clone; files laid by an older build can report errors the current API does not have, so load
+  the clone once (developer mode) before trusting a failure. The folder hot-reloads into
   every live session that loads it through `CLAUDE_CODE_PLUGIN_DIRS`, so every save must compile.
 - **Version in two places.** A release bumps the version in both manifests and adds a `CHANGELOG.md`
   entry.
