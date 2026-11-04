@@ -3,7 +3,7 @@
 All notable changes to this project are documented here. This project adheres to
 [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [2.1.1] — 2026-11-04
 
 ### Fixed
 - `/hr-watch` or `hr_watch` with no folder, while a watch is on, keeps that watch's folder and
