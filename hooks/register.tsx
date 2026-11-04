@@ -1,5 +1,5 @@
 import { atom, read, update } from 'claude-code'
-import type { AgentInfo, Register, Timer } from 'claude-code'
+import type { AgentInfo, EngineInterface, Register, Timer } from 'claude-code'
 
 import type { AgentRow, Gauge, Hr, HrMode } from '../types'
 
@@ -125,7 +125,8 @@ export async function finishClear(state: Hr, io: ClearIo): Promise<Hr> {
   return { ...state, phase: 'armed', waitsForDrop: true }
 }
 
-type Dollar = Parameters<typeof update>[0]
+// The whole engine interface: the helpers below read files, the session and the UI, not only stored values.
+type Dollar = EngineInterface
 type Map = Record<string, AgentRow>
 
 // Kept per process, not per session start: the one running poll, and whether a
@@ -395,7 +396,7 @@ async function armWatch(
 async function disarmWatch($: Dollar): Promise<string> {
   if (isClearing) isOffDuringClear = true
   pendingResume = undefined
-  await update($, hr, (cur: Hr) => ({
+  await update($, hr, (cur: Hr): Hr => ({
     runFolder: '',
     phase: 'off',
     mode: 'nudge',
@@ -651,7 +652,7 @@ export const register: Register = on => {
       const runFolder = state.runFolder
       void $.prompt.submit({ text: nudgeText(percent, runFolder) }).catch(async (error: unknown) => {
         $.ui.toast(`HR: the handoff nudge failed, watch off: ${error instanceof Error ? error.message : String(error)}`)
-        await update($, hr, (cur: Hr) => (cur.phase === 'nudged' ? { ...cur, phase: 'off' } : cur))
+        await update($, hr, (cur: Hr): Hr => (cur.phase === 'nudged' ? { ...cur, phase: 'off' } : cur))
       })
     }
 
