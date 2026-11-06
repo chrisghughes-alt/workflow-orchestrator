@@ -52,26 +52,41 @@ function modeOf(state: Hr): HrMode {
   return state.mode === 'auto' ? 'auto' : 'nudge'
 }
 
-function nudgeText(percent: number, runFolder: string): string {
-  return (
-    `[HR] Context used ${Math.round(percent)}%. Write the orchestrator handoff to ${runFolder}\\handoffs\\orchestrator-handoff-YYYYMMDD-HHMM.md ` +
-    `(use the clock for the stamp), update ${runFolder}\\orchestrator-state.md, do whatever your workflow document ` +
-    'requires at a handoff, then end your turn. The handoff ends with a section headed "Next three actions".'
-  )
+// What every handoff ends with: a ledger of the phases run, then the next steps.
+const HANDOFF_SECTIONS =
+  'The handoff ends with two sections: "Phases run so far" (one line per distinct phase: what was done, ' +
+  "what it produced, what approval it waited on; carry the previous handoff's lines forward) and, last, " +
+  '"Next three actions".'
+
+function nudgeText(percent: number, runFolder: string, workflowDoc: string | undefined): string {
+  const head = `[HR] Context used ${Math.round(percent)}%. Write the orchestrator handoff to ${runFolder}\\handoffs\\orchestrator-handoff-YYYYMMDD-HHMM.md `
+  // With a workflow document, its run-state file and handoff rules apply.
+  const middle =
+    workflowDoc === undefined
+      ? '(use the clock for the stamp), then end your turn. '
+      : `(use the clock for the stamp), update ${runFolder}\\orchestrator-state.md, do whatever your workflow document ` +
+        'requires at a handoff, then end your turn. '
+  return head + middle + HANDOFF_SECTIONS
 }
 
 // The successor arms the watch through the tool, since a model cannot run a
 // slash command, with everything the watch was armed with. With no workflow
-// document given, the run-state file says how to resume instead.
+// document given, the prompt names no run-state file or cron: the handoff
+// alone says where to continue.
 function resumeText(handoffPath: string, state: Hr): string {
   const { runFolder, workflowDoc } = state
-  const reading = workflowDoc ?? "the run-state file's 'how to resume' section"
-  const docArg = workflowDoc === undefined ? '' : ` and workflowDoc ${workflowDoc}`
+  if (workflowDoc === undefined) {
+    return (
+      `[HR] Successor start. Read ${handoffPath} in full, call the mcp__workflow-orchestrator__hr_watch ` +
+      `tool with runFolder ${runFolder}, mode ${modeOf(state)}, threshold ${state.threshold}, ` +
+      "then continue from the handoff's next three actions."
+    )
+  }
   return (
-    `[HR] Successor start. Read ${handoffPath}, ${runFolder}\\orchestrator-state.md and ${reading} in full, ` +
+    `[HR] Successor start. Read ${handoffPath}, ${runFolder}\\orchestrator-state.md and ${workflowDoc} in full, ` +
     'check CronList and re-create the heartbeat cron only if it is gone, call the ' +
     `mcp__workflow-orchestrator__hr_watch tool with runFolder ${runFolder}, mode ${modeOf(state)}, ` +
-    `threshold ${state.threshold}${docArg}, then continue from the handoff's next three actions.`
+    `threshold ${state.threshold} and workflowDoc ${workflowDoc}, then continue from the handoff's next three actions.`
   )
 }
 
@@ -650,7 +665,7 @@ export const register: Register = on => {
       })
       if (state === undefined) return
       const runFolder = state.runFolder
-      void $.prompt.submit({ text: nudgeText(percent, runFolder) }).catch(async (error: unknown) => {
+      void $.prompt.submit({ text: nudgeText(percent, runFolder, state.workflowDoc) }).catch(async (error: unknown) => {
         $.ui.toast(`HR: the handoff nudge failed, watch off: ${error instanceof Error ? error.message : String(error)}`)
         await update($, hr, (cur: Hr): Hr => (cur.phase === 'nudged' ? { ...cur, phase: 'off' } : cur))
       })
