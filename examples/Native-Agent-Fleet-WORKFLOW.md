@@ -146,9 +146,10 @@ history. So the run swaps to a fresh orchestrator context before automatic compa
 swap happens inside the same session, and role agents notice nothing beyond a pause in replies.
 
 `/clear` keeps the background agents, the session crons and the roster. It resets the plugin's own
-stored state. In `auto` mode the plugin writes the watch back right after its own clear; after a
-person's `/clear` in `nudge` mode the watch stays off until the successor's `hr_watch` call arms it. Because the agents' names are
-unchanged, every brief's `to: 'main'` still reaches the orchestrator after the swap.
+stored state. In `auto` mode the plugin writes the watch back right after its own clear; in `nudge`
+mode it notices the person's `/clear`, sends the resume prompt and re-arms the watch itself. Either
+way, the successor's `hr_watch` call then re-arms it with the same arguments. Because the agents'
+names are unchanged, every brief's `to: 'main'` still reaches the orchestrator after the swap.
 
 1. **Nudge.** The plugin submits its nudge as the orchestrator's next prompt once the session is idle.
 2. **Handoff, run-state update, end turn.** The orchestrator writes
@@ -225,8 +226,9 @@ Before any item work, the orchestrator:
 5. derives the recycle threshold in tokens for each role model and records it.
 
 The person can change the watch at any time with `/hr-watch [nudge|auto]` or `/hr-off`. A bare call
-keeps the run folder, the workflow document and the threshold; giving a folder starts the watch over
-and needs `doc=<path to this document>` again.
+keeps the run folder, the workflow document and the threshold while a watch is on; giving a folder
+starts the watch over and needs `doc=<path to this document>` again. With no watch on, a bare call
+arms the default folder with no document, so after `/hr-off` give the folder and `doc=` again.
 Startup is not a phase of its own; Phase 1's `Pre` step performs it.
 
 ---
