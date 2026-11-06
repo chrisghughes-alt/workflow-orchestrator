@@ -125,7 +125,8 @@ The session scratchpad is for throwaway files only.
   threshold (default 50% of context used) the plugin submits one nudge asking the orchestrator to
   write a handoff file to `<run folder>/handoffs/orchestrator-handoff-YYYYMMDD-HHMM.md`, update
   `<run folder>/orchestrator-state.md`, do whatever this workflow requires at a handoff, and end its
-  turn. A nudge is expected process, not an anomaly, and it is not a gate for the person. What happens
+  turn. The handoff ends with two sections, **Phases run so far** and, last, **Next three actions**.
+  A nudge is expected process, not an anomaly, and it is not a gate for the person. What happens
   next depends on the mode (see Orchestrator succession). The watch does not watch role agents; their
   budgets are the heartbeat's job.
 - **Model tiers.** `<slot: model tiers>`: name the orchestrator's model, each role's model, the helper
@@ -166,7 +167,8 @@ unchanged, every brief's `to: 'main'` still reaches the orchestrator after the s
 
    The resume prompt names the handoff file, the run-state file and this document; tells the successor
    to re-create the heartbeat cron only if it is gone; tells it to call `hr_watch` with the same
-   arguments; and tells it to continue from the handoff's **Next three actions**.
+   arguments; and tells it to continue from the handoff's **Next three actions**. The successor keeps
+   the **Phases run so far** section going in its own handoff, carrying the previous lines forward.
 4. **Successor start.** The successor reads the handoff, the run-state file and this document in
    full. It checks `CronList` and re-creates the heartbeat only if it is missing, calls
    `mcp__workflow-orchestrator__hr_watch` with the same run folder, mode and workflow document, and

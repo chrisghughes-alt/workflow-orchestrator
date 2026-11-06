@@ -3,6 +3,20 @@
 All notable changes to this project are documented here. This project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## [2.2.0] — 2026-11-06
+
+### Added
+- Every hand-off request asks for a "Phases run so far" section before "Next three actions", one
+  line per phase, carried forward from the previous hand-off.
+- `/workflow-capture` reads the context watch's hand-offs (Stage 0) before the in-context pass, so
+  a run the watch cleared can still be captured whole.
+
+### Fixed
+- With no workflow document, the hand-off request and the resume prompt no longer name the
+  run-state file, its "how to resume" section or the heartbeat cron. Those are fleet conventions
+  the fleet example describes; a successor in a project without them was told to look for things
+  that did not exist.
+
 ## [2.1.1] — 2026-11-04
 
 ### Fixed

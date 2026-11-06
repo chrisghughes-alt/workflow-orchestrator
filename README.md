@@ -32,7 +32,8 @@ On Claude Code 2.1.275 or later, one line does both:
 3. **Type `/hr-watch`.** The context watch is now armed with its defaults.
 4. **If the repo has a `docs/WORKFLOW.md`,** type `/workflow-start <what you want done>`.
 5. **If it does not,** type `/workflow-capture` at the end of a session you would want to repeat. It
-   writes the workflow file for you.
+   writes the workflow file for you. It reads the context watch's hand-offs first, so a run the watch
+   cleared can still be captured whole.
 
 ## Agent management views
 
@@ -98,7 +99,8 @@ silently or borrows another project's phases:
   happened. It can also read your `CLAUDE.md`, `docs/` and Claude memories so the result matches your
   real conventions. It then walks you through each phase so you confirm or edit its `Invoke`, `Output`,
   `Gate` and `Route`, and only then writes a runnable `docs/WORKFLOW.md`. It works even on a run you
-  drove by hand without `/workflow-start`.
+  drove by hand without `/workflow-start`. It reads the context watch's hand-offs first, so a run the
+  watch cleared can still be captured whole.
 - **Let the engine scaffold one.** Run `/workflow-start` in a project with no `docs/WORKFLOW.md`, and it
   offers to write a starter for you to customize.
 - **Copy an example.** Start from [`examples/minimal-WORKFLOW.md`](examples/minimal-WORKFLOW.md). The
@@ -136,8 +138,8 @@ appear, which is its proof that the hand-off is written.
 (created when needed), nudge mode, and a 50% threshold.
 
 When the gauge reaches 50%, the plugin asks the model for a hand-off. The request tells the model where
-to write the hand-off file and that the file ends with a section headed **Next three actions**. The
-header then shows `HR nudged`.
+to write the hand-off file and that the file ends with two sections, **Phases run so far** and, last,
+**Next three actions**. The header then shows `HR nudged`.
 
 ![The pane header after the nudge: HR nudged beside the context gauge, with four agents listed](docs/images/hr-nudged.png)
 
@@ -153,11 +155,12 @@ context, and the new context continues from the hand-off's "Next three actions".
 #### Auto mode
 
 In `auto` mode the plugin does not wait for you. When the hand-off file appears, it runs `/clear` itself
-and submits a resume prompt. The prompt names the hand-off file, the run-state file and the workflow
-document. It tells the new context to re-create the heartbeat cron only if it is gone, to call
-`hr_watch` again with the same arguments, and to continue from the hand-off's "Next three actions".
-Without a workflow document, the prompt points at the "how to resume" section of the run-state file
-instead. Use this for a long run with nobody at the keyboard. Use the default, `nudge`, when you are at
+and submits a resume prompt. When a workflow document was given, the prompt names the hand-off file,
+the run-state file and that document. It tells the new context to re-create the heartbeat cron only if
+it is gone, to call `hr_watch` again with the same arguments, and to continue from the hand-off's
+"Next three actions". Without a workflow document, the prompt names only the hand-off file, and the new
+context calls `hr_watch` again with the same run folder, mode and threshold and continues from
+"Next three actions". Use this for a long run with nobody at the keyboard. Use the default, `nudge`, when you are at
 the keyboard and want to read the hand-off first.
 
 #### Tools and commands
@@ -176,9 +179,9 @@ workflow document was given, it adds `, doc <path>`.
 #### Paths
 
 The hand-off request asks the model to write the hand-off to
-`<run folder>/handoffs/orchestrator-handoff-YYYYMMDD-HHMM.md`, update
-`<run folder>/orchestrator-state.md`, do whatever the workflow document requires at a hand-off, and end
-its turn.
+`<run folder>/handoffs/orchestrator-handoff-YYYYMMDD-HHMM.md` and end its turn. When a workflow
+document was given, it also asks the model to update `<run folder>/orchestrator-state.md` and do
+whatever the workflow document requires at a hand-off.
 
 A folder or document you give must be an absolute path and must exist; only the default folder is
 created for you. A path over 1024 characters or with control characters in it is refused, and the watch
@@ -226,8 +229,8 @@ item tracker, naming, review chain and gates, is marked with a `<slot: …>` pla
      handoffs/               orchestrator and agent hand-off files
    ```
 
-2. **A hand-off shape** that ends with a section headed **Next three actions**. The new context continues
-   from it.
+2. **A hand-off shape** that ends with a section headed **Phases run so far**, then a section headed
+   **Next three actions**. The new context continues from the last.
 3. **A workflow document** the new context reads in full after a hand-off, passed as `workflowDoc`.
 4. **Arming at kickoff.** The orchestrator calls `hr_watch` with the run folder, the mode and the
    workflow document when a run starts, and calls `hr_off` when it ends.
