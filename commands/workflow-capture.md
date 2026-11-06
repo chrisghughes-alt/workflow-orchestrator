@@ -50,13 +50,15 @@ the **hand-off** files it had the session write. Gather them before analyzing an
    modification time. Ignore files that do not end in `.md`; the folder may hold a `.keep`
    placeholder.
 3. **Take the phase lines.** From each, take the section headed **Phases run so far**. The
-   primary record is the hand-off the resume prompt names, when one is in context; otherwise
-   it is the newest hand-off in the chosen folder that has a **Phases run so far** section.
-   Each hand-off carries the previous lines forward, so an older hand-off belongs to this run
-   only when its phase lines appear, in order, at the start of the primary's section. Older
-   hand-offs that belong may fill gaps or check order. Any other hand-off in the folder with
-   that section is from another run, since the default folder is shared by every watch in the
-   project: name it as "from another run, not used" and take nothing from it.
+   primary record is the hand-off the resume prompt names, when one is in context and that
+   file is in the chosen folder; otherwise it is the newest hand-off in the chosen folder that
+   has a **Phases run so far** section. Each hand-off carries the previous lines forward, so an
+   older hand-off belongs to this run only when its phase lines appear, in order, at the start
+   of the primary's section, allowing its last line to differ in what it says was done, as long
+   as it names the same phase (a phase in progress at that hand-off was rewritten later). Older hand-offs that belong may fill gaps or check order. Any
+   other hand-off in the folder with that section is from another run, since the default
+   folder is shared by every watch in the project: name it as "from another run, not used" and
+   take nothing from it.
 4. **Older hand-offs.** A hand-off with no **Phases run so far** section was written by an
    older release. Name it and say its phases cannot be recovered from it; do **not** infer
    phases from its other sections.

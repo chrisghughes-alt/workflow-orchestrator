@@ -3,6 +3,18 @@
 All notable changes to this project are documented here. This project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## [2.2.1] — 2026-11-06
+
+### Fixed
+- The hand-off request and the resume prompt build their paths with the run folder's own separator,
+  so a macOS or Linux run folder no longer gets backslashes in its hand-off path.
+- `/workflow-capture` Stage 0: the resume prompt's hand-off is the primary record only when that file
+  is still in the chosen folder, and an older hand-off from the same run still counts when only its
+  last phase line was rewritten in the next hand-off.
+- The fleet example no longer says the watch stays off after a person's `/clear` in nudge mode (the
+  plugin has re-armed it since 2.1.0), and says that a bare `/hr-watch` keeps the folder, document
+  and threshold only while a watch is on.
+
 ## [2.2.0] — 2026-11-06
 
 ### Added
