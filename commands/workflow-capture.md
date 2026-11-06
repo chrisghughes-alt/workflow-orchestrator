@@ -55,10 +55,10 @@ the **hand-off** files it had the session write. Gather them before analyzing an
    has a **Phases run so far** section. Each hand-off carries the previous lines forward, so an
    older hand-off belongs to this run only when its phase lines appear, in order, at the start
    of the primary's section, allowing its last line to differ in what it says was done, as long
-   as it names the same phase (a phase in progress at that hand-off was rewritten later). Older hand-offs that belong may fill gaps or check order. Any
-   other hand-off in the folder with that section is from another run, since the default
-   folder is shared by every watch in the project: name it as "from another run, not used" and
-   take nothing from it.
+   as it names the same phase (a phase in progress at that hand-off was rewritten later). Older
+   hand-offs that belong may fill gaps or check order. Any other hand-off in the folder with
+   that section is from another run, since the default folder is shared by every watch in the
+   project: name it as "from another run, not used" and take nothing from it.
 4. **Older hand-offs.** A hand-off with no **Phases run so far** section was written by an
    older release. Name it and say its phases cannot be recovered from it; do **not** infer
    phases from its other sections.
