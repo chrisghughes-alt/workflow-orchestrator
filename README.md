@@ -160,8 +160,8 @@ the run-state file and that document. It tells the new context to re-create the 
 it is gone, to call `hr_watch` again with the same arguments, and to continue from the hand-off's
 "Next three actions". Without a workflow document, the prompt names only the hand-off file, and the new
 context calls `hr_watch` again with the same run folder, mode and threshold and continues from
-"Next three actions". Use this for a long run with nobody at the keyboard. Use the default, `nudge`, when you are at
-the keyboard and want to read the hand-off first.
+"Next three actions". Use this for a long run with nobody at the keyboard. Use the default, `nudge`,
+when you are at the keyboard and want to read the hand-off first.
 
 #### Tools and commands
 

@@ -11,6 +11,11 @@ All notable changes to this project are documented here. This project adheres to
 - `/workflow-capture` reads the context watch's hand-offs (Stage 0) before the in-context pass, so
   a run the watch cleared can still be captured whole.
 
+### Changed
+- A watch armed without a workflow document now gets the generic hand-off request and resume
+  prompt. A fleet run, or any run with a workflow document, should pass it (`doc=` on `/hr-watch`,
+  or `workflowDoc` on `hr_watch`) so the hand-off and resume keep that document's duties.
+
 ### Fixed
 - With no workflow document, the hand-off request and the resume prompt no longer name the
   run-state file, its "how to resume" section or the heartbeat cron. Those are fleet conventions

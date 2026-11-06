@@ -155,8 +155,9 @@ unchanged, every brief's `to: 'main'` still reaches the orchestrator after the s
    `<run folder>/handoffs/orchestrator-handoff-YYYYMMDD-HHMM.md` (read the clock for the stamp)
    holding: the run plan and the current phase of each item; every ruling so far; every active agent
    (name, brief path, which report is expected next); dispatches in flight and the evidence that will
-   close each; open questions for the person; paths to the run-state file and every brief; a section headed **Phases run so far** (one line per
-   phase, carried forward from the previous handoff); and, last, a section headed **Next three actions**. Anything half-verified is recorded as unverified, not
+   close each; open questions for the person; paths to the run-state file and every brief; a section
+   headed **Phases run so far** (one line per phase, carried forward from the previous handoff); and,
+   last, a section headed **Next three actions**. Anything half-verified is recorded as unverified, not
    finished in a hurry. It appends the handoff path to the run-state file, does
    `<slot: whatever else your methodology requires at a handoff, such as committing a tracker
    section>`, and ends its turn.
@@ -223,7 +224,9 @@ Before any item work, the orchestrator:
 4. creates the 30-minute heartbeat cron;
 5. derives the recycle threshold in tokens for each role model and records it.
 
-The person can change the watch at any time with `/hr-watch <run folder> [nudge|auto]` or `/hr-off`.
+The person can change the watch at any time with `/hr-watch [nudge|auto]` or `/hr-off`. A bare call
+keeps the run folder, the workflow document and the threshold; giving a folder starts the watch over
+and needs `doc=<path to this document>` again.
 Startup is not a phase of its own; Phase 1's `Pre` step performs it.
 
 ---

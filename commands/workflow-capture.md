@@ -39,23 +39,29 @@ the **hand-off** files it had the session write. Gather them before analyzing an
 
 1. **Find the run folder.** If the context holds a prompt starting
    `[HR] Successor start. Read <path>`, the hand-offs folder is the folder of that path; use
-   it without asking. Otherwise glob `<project root>/.runs/*/handoffs/*.md`. If that finds
-   hand-offs, use `AskUserQuestion` to ask which run this session was, **even when only one
-   run folder is found**: a lone folder may be an old, unrelated run. List each folder with
-   its newest file's date, and always include a **none of these** option. If the glob finds
-   none, or the user picks **none of these**, say "No hand-offs found; capturing from the
-   context window only" and go to Stage 1.
+   it without asking. Otherwise, or if that folder is missing or holds no `.md` files, glob
+   `<project root>/.runs/*/handoffs/*.md`. If that finds hand-offs, use `AskUserQuestion` to
+   ask which run this session was, **even when only one run folder is found**: a lone folder
+   may be an old, unrelated run. List each folder with its newest file's date, and always
+   include a **none of these** option. If the glob finds none, or the user picks **none of
+   these**, say "No hand-offs found; capturing from the context window only" and go to
+   Stage 1.
 2. **Read every hand-off.** Read every `.md` file in the chosen folder, oldest first by
    modification time. Ignore files that do not end in `.md`; the folder may hold a `.keep`
    placeholder.
 3. **Take the phase lines.** From each, take the section headed **Phases run so far**. The
-   newest hand-off's section is the fullest, since each hand-off carries the previous lines
-   forward: use it as the primary record, and the older ones to fill gaps or check order.
+   primary record is the hand-off the resume prompt names, when one is in context; otherwise
+   it is the newest hand-off in the chosen folder that has a **Phases run so far** section.
+   Each hand-off carries the previous lines forward, so an older hand-off belongs to this run
+   only when its phase lines appear, in order, at the start of the primary's section. Older
+   hand-offs that belong may fill gaps or check order. Any other hand-off in the folder with
+   that section is from another run, since the default folder is shared by every watch in the
+   project: name it as "from another run, not used" and take nothing from it.
 4. **Older hand-offs.** A hand-off with no **Phases run so far** section was written by an
    older release. Name it and say its phases cannot be recovered from it; do **not** infer
    phases from its other sections.
-5. **Say what was read.** Tell the user which files were read, one line each, before Stage 1
-   begins.
+5. **Say what was read.** Tell the user which files were read and which were set aside as from
+   another run, one line each, before Stage 1 begins.
 
 ---
 
