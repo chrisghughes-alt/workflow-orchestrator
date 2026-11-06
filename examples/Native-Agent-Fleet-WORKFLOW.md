@@ -228,7 +228,7 @@ Before any item work, the orchestrator:
 The person can change the watch at any time with `/hr-watch [nudge|auto]` or `/hr-off`. A bare call
 keeps the run folder, the workflow document and the threshold while a watch is on; giving a folder
 starts the watch over and needs `doc=<path to this document>` again. With no watch on, a bare call
-arms the default folder with no document, so after `/hr-off` give the folder and `doc=` again.
+arms the default folder with no document, so after `/hr-off` give the folder, `doc=` and any threshold again.
 Startup is not a phase of its own; Phase 1's `Pre` step performs it.
 
 ---
