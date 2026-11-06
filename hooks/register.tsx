@@ -59,12 +59,13 @@ const HANDOFF_SECTIONS =
   '"Next three actions".'
 
 function nudgeText(percent: number, runFolder: string, workflowDoc: string | undefined): string {
-  const head = `[HR] Context used ${Math.round(percent)}%. Write the orchestrator handoff to ${runFolder}\\handoffs\\orchestrator-handoff-YYYYMMDD-HHMM.md `
+  const handoff = within(within(runFolder, 'handoffs'), 'orchestrator-handoff-YYYYMMDD-HHMM.md')
+  const head = `[HR] Context used ${Math.round(percent)}%. Write the orchestrator handoff to ${handoff} `
   // With a workflow document, its run-state file and handoff rules apply.
   const middle =
     workflowDoc === undefined
       ? '(use the clock for the stamp), then end your turn. '
-      : `(use the clock for the stamp), update ${runFolder}\\orchestrator-state.md, do whatever your workflow document ` +
+      : `(use the clock for the stamp), update ${within(runFolder, 'orchestrator-state.md')}, do whatever your workflow document ` +
         'requires at a handoff, then end your turn. '
   return head + middle + HANDOFF_SECTIONS
 }
@@ -83,7 +84,7 @@ function resumeText(handoffPath: string, state: Hr): string {
     )
   }
   return (
-    `[HR] Successor start. Read ${handoffPath}, ${runFolder}\\orchestrator-state.md and ${workflowDoc} in full, ` +
+    `[HR] Successor start. Read ${handoffPath}, ${within(runFolder, 'orchestrator-state.md')} and ${workflowDoc} in full, ` +
     'check CronList and re-create the heartbeat cron only if it is gone, call the ' +
     `mcp__workflow-orchestrator__hr_watch tool with runFolder ${runFolder}, mode ${modeOf(state)}, ` +
     `threshold ${state.threshold} and workflowDoc ${workflowDoc}, then continue from the handoff's next three actions.`

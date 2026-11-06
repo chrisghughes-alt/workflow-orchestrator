@@ -256,9 +256,13 @@ const RESUME_WITH_DOC = (handoff: string, threshold: number) =>
 
 type Fs = { name: string; kind: 'file' | 'dir' | 'other'; size: number; mtimeMs: number; isLink: boolean }
 
-// Stands in for the engine under the context watch: a run folder that exists,
-// a gauge the test sets, and a record of every prompt, command and toast.
-function hrEngine(on: Parameters<TestBody>[1]) {
+// Stands in for the engine under the context watch: a run folder that exists
+// (RUN unless another is given), a gauge the test sets, and a record of every
+// prompt, command and toast.
+function hrEngine(on: Parameters<TestBody>[1], run = RUN) {
+  // The engine resolves a POSIX path on the current drive before a hook sees it,
+  // so /home/u/x arrives as C:\home\u\x.
+  const seen = run.startsWith('/') ? `C:${run.replaceAll('/', '\\')}` : run
   const clock = mock.clock(on)
   const world = {
     percent: 10 as number | undefined,
@@ -299,8 +303,8 @@ function hrEngine(on: Parameters<TestBody>[1]) {
   })
   on('session.start', (_, e) => ({ cwd: e.cwd }))
   // The engine hands these hooks the path in Windows form, backslashes throughout.
-  on('fs.exists', (_, e) => ({ value: e.path === RUN || world.docs.includes(e.path) || world.dirs.includes(e.path) }))
-  on('fs.list', (_, e) => ({ value: e.path === `${RUN}\\handoffs` ? world.handoffs : [] }))
+  on('fs.exists', (_, e) => ({ value: e.path === seen || world.docs.includes(e.path) || world.dirs.includes(e.path) }))
+  on('fs.list', (_, e) => ({ value: e.path === `${seen}\\handoffs` ? world.handoffs : [] }))
   on('prompt.submit', (_, e) => {
     world.submits.push(e.text)
     return { text: e.text }
@@ -1119,6 +1123,36 @@ test('switching to auto after the nudge keeps the run, does not nudge again, and
   expect(world.submits[1]).toContain(`Read ${RUN}\\handoffs\\h.md`)
   expect(world.submits[1]).toContain(`runFolder ${RUN}, mode auto, threshold 50, then`)
   expect(world.written).toEqual([])
+})
+
+test('a POSIX run folder gets slash-joined paths in the nudge and the resume', async ($, on) => {
+  const POSIX_RUN = '/home/u/.runs/hr'
+  const store = stateStore(on)
+  const { clock, world } = hrEngine(on, POSIX_RUN)
+  world.onCommand = command => {
+    if (command === 'clear') store.forget('workflow-orchestrator')
+  }
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+
+  const armed = await $.tool.call({ tool: 'mcp__workflow-orchestrator__hr_watch', runFolder: POSIX_RUN } as never)
+  expect(armed.result).toBe(`HR armed on ${POSIX_RUN} (nudge, 50%)`)
+  world.percent = 55
+  await clock.advance(1500)
+  expect(world.submits[0]).toBe(
+    `[HR] Context used 55%. Write the orchestrator handoff to ${POSIX_RUN}/handoffs/orchestrator-handoff-YYYYMMDD-HHMM.md ` +
+      `(use the clock for the stamp), then end your turn. ${HANDOFF_SECTIONS}`,
+  )
+
+  // Now auto on the same run: the handoff lands, the watch clears and resumes.
+  const auto = await $.tool.call({ tool: 'mcp__workflow-orchestrator__hr_watch', mode: 'auto' } as never)
+  expect(auto.result).toBe(`HR armed on ${POSIX_RUN} (auto, 50%)`)
+  world.handoffs = [{ name: 'h.md', kind: 'file', size: 1, mtimeMs: clock.now(), isLink: false }]
+  await $.turn.complete(mainTurnEnds)
+  await clock.advance(3000)
+  expect(world.commands.filter(c => c === 'clear')).toEqual(['clear'])
+  expect(world.submits.length).toBe(2)
+  expect(world.submits[1]).toContain(`Read ${POSIX_RUN}/handoffs/h.md in full`)
+  expect(world.submits[1]).not.toContain('\\')
 })
 
 test('a threshold changed while ready reaches the resume prompt after the person clears', async ($, on) => {
