@@ -1,6 +1,6 @@
 {
   "name": "workflow-orchestrator",
-  "version": "2.1.1",
+  "version": "2.2.0",
   "description": "Generic, project-agnostic pipeline orchestrator. Drives a project's docs/WORKFLOW.md in defined order with binding gates and per-phase output checks via the /workflow-start command, and ships the fleet mechanics for running a workflow across named background agents: an Agents side pane (model, activity, tokens, context per agent; click a row to view it), a context gauge for the main session, and an opt-in context watch (/hr-watch, /hr-off; tools agents, hr_watch, hr_off) that asks for a handoff at a threshold and, in auto mode, clears and resumes the session.",
   "author": { "name": "Chris Hughes" },
   "homepage": "https://github.com/chrisghughes-alt/workflow-orchestrator",

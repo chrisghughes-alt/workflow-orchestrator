@@ -14,12 +14,16 @@ interview and, at the end, writes one Markdown file.
 
 ## What "the session" means
 
-This command reads the **current in-context conversation only** — the transcript present in
-your context window right now. It does **not** load prior sessions or read transcript files.
+This command reads the **current in-context conversation** — the transcript present in your
+context window right now — **and** the **hand-off files** the context watch produced for this
+run (Stage 0). It does **not** load prior sessions or read transcript files.
 
 - **Compacted context:** if earlier work was summarized away, Stage 1 will under-detect
   phases. Say so, and offer the user a chance to paste or re-summarize the missing steps
   before continuing.
+- **Cleared context:** if the context watch cleared the session during the run, the earlier
+  part of the session is in the hand-offs, which Stage 0 reads. Without them the capture
+  covers only the part since the last clear; say so.
 - **Mid-session use:** you capture the session *so far*. Phases not yet run won't appear. Note
   this and remind the user they can re-run later and choose **augment** (Stage 4) to add
   phases discovered afterward.
@@ -28,11 +32,45 @@ This command **never** invents phases or fabricates artifacts to look complete.
 
 ---
 
+## Stage 0 — Gather the hand-offs
+
+When the context watch clears a session mid-run, the work before the clear survives only in
+the **hand-off** files it had the session write. Gather them before analyzing anything.
+
+1. **Find the run folder.** If the context holds a prompt starting
+   `[HR] Successor start. Read <path>`, the hand-offs folder is the folder of that path; use
+   it without asking. Otherwise, or if that folder is missing or holds no `.md` files, glob
+   `<project root>/.runs/*/handoffs/*.md`. If that finds hand-offs, use `AskUserQuestion` to
+   ask which run this session was, **even when only one run folder is found**: a lone folder
+   may be an old, unrelated run. List each folder with its newest file's date, and always
+   include a **none of these** option. If the glob finds none, or the user picks **none of
+   these**, say "No hand-offs found; capturing from the context window only" and go to
+   Stage 1.
+2. **Read every hand-off.** Read every `.md` file in the chosen folder, oldest first by
+   modification time. Ignore files that do not end in `.md`; the folder may hold a `.keep`
+   placeholder.
+3. **Take the phase lines.** From each, take the section headed **Phases run so far**. The
+   primary record is the hand-off the resume prompt names, when one is in context; otherwise
+   it is the newest hand-off in the chosen folder that has a **Phases run so far** section.
+   Each hand-off carries the previous lines forward, so an older hand-off belongs to this run
+   only when its phase lines appear, in order, at the start of the primary's section. Older
+   hand-offs that belong may fill gaps or check order. Any other hand-off in the folder with
+   that section is from another run, since the default folder is shared by every watch in the
+   project: name it as "from another run, not used" and take nothing from it.
+4. **Older hand-offs.** A hand-off with no **Phases run so far** section was written by an
+   older release. Name it and say its phases cannot be recovered from it; do **not** infer
+   phases from its other sections.
+5. **Say what was read.** Tell the user which files were read and which were set aside as from
+   another run, one line each, before Stage 1 begins.
+
+---
+
 ## Stage 1 — Analyze the session
 
-Review the current conversation and extract a **candidate** pipeline: the distinct units of
-work that happened, in order. For each candidate phase, infer the engine's directive fields
-(the same vocabulary `/workflow-start` parses):
+Review the current conversation, together with the phase lines gathered in Stage 0, which come
+first in order, and extract a **candidate** pipeline: the distinct units of work that
+happened, in order. For each candidate phase, infer the engine's directive fields (the same
+vocabulary `/workflow-start` parses):
 
 - `Invoke` — the skill or orchestrator action that drove the phase (`none` if you, the
   orchestrator, performed it directly rather than invoking a skill).

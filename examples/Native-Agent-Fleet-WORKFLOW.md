@@ -125,7 +125,8 @@ The session scratchpad is for throwaway files only.
   threshold (default 50% of context used) the plugin submits one nudge asking the orchestrator to
   write a handoff file to `<run folder>/handoffs/orchestrator-handoff-YYYYMMDD-HHMM.md`, update
   `<run folder>/orchestrator-state.md`, do whatever this workflow requires at a handoff, and end its
-  turn. A nudge is expected process, not an anomaly, and it is not a gate for the person. What happens
+  turn. The handoff ends with two sections, **Phases run so far** and, last, **Next three actions**.
+  A nudge is expected process, not an anomaly, and it is not a gate for the person. What happens
   next depends on the mode (see Orchestrator succession). The watch does not watch role agents; their
   budgets are the heartbeat's job.
 - **Model tiers.** `<slot: model tiers>`: name the orchestrator's model, each role's model, the helper
@@ -154,8 +155,9 @@ unchanged, every brief's `to: 'main'` still reaches the orchestrator after the s
    `<run folder>/handoffs/orchestrator-handoff-YYYYMMDD-HHMM.md` (read the clock for the stamp)
    holding: the run plan and the current phase of each item; every ruling so far; every active agent
    (name, brief path, which report is expected next); dispatches in flight and the evidence that will
-   close each; open questions for the person; paths to the run-state file and every brief; and, last,
-   a section headed **Next three actions**. Anything half-verified is recorded as unverified, not
+   close each; open questions for the person; paths to the run-state file and every brief; a section
+   headed **Phases run so far** (one line per phase, carried forward from the previous handoff); and,
+   last, a section headed **Next three actions**. Anything half-verified is recorded as unverified, not
    finished in a hurry. It appends the handoff path to the run-state file, does
    `<slot: whatever else your methodology requires at a handoff, such as committing a tracker
    section>`, and ends its turn.
@@ -166,7 +168,8 @@ unchanged, every brief's `to: 'main'` still reaches the orchestrator after the s
 
    The resume prompt names the handoff file, the run-state file and this document; tells the successor
    to re-create the heartbeat cron only if it is gone; tells it to call `hr_watch` with the same
-   arguments; and tells it to continue from the handoff's **Next three actions**.
+   arguments; and tells it to continue from the handoff's **Next three actions**. The successor keeps
+   the **Phases run so far** section going in its own handoff, carrying the previous lines forward.
 4. **Successor start.** The successor reads the handoff, the run-state file and this document in
    full. It checks `CronList` and re-creates the heartbeat only if it is missing, calls
    `mcp__workflow-orchestrator__hr_watch` with the same run folder, mode and workflow document, and
@@ -221,7 +224,9 @@ Before any item work, the orchestrator:
 4. creates the 30-minute heartbeat cron;
 5. derives the recycle threshold in tokens for each role model and records it.
 
-The person can change the watch at any time with `/hr-watch <run folder> [nudge|auto]` or `/hr-off`.
+The person can change the watch at any time with `/hr-watch [nudge|auto]` or `/hr-off`. A bare call
+keeps the run folder, the workflow document and the threshold; giving a folder starts the watch over
+and needs `doc=<path to this document>` again.
 Startup is not a phase of its own; Phase 1's `Pre` step performs it.
 
 ---

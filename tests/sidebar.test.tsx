@@ -234,10 +234,17 @@ const RUN = 'C:\\runs\\r1'
 const ROOT = 'C:\\repo'
 const DEFAULT_RUN = `${ROOT}\\.runs\\hr`
 const PLACEHOLDER = `${DEFAULT_RUN}\\handoffs\\.keep`
+const HANDOFF_SECTIONS =
+  'The handoff ends with two sections: "Phases run so far" (one line per distinct phase: what was done, ' +
+  "what it produced, what approval it waited on; carry the previous handoff's lines forward) and, last, " +
+  '"Next three actions".'
 const NUDGE_55 =
   `[HR] Context used 55%. Write the orchestrator handoff to ${RUN}\\handoffs\\orchestrator-handoff-YYYYMMDD-HHMM.md ` +
+  `(use the clock for the stamp), then end your turn. ${HANDOFF_SECTIONS}`
+const NUDGE_55_DOC =
+  `[HR] Context used 55%. Write the orchestrator handoff to ${RUN}\\handoffs\\orchestrator-handoff-YYYYMMDD-HHMM.md ` +
   `(use the clock for the stamp), update ${RUN}\\orchestrator-state.md, do whatever your workflow document requires ` +
-  'at a handoff, then end your turn. The handoff ends with a section headed "Next three actions".'
+  `at a handoff, then end your turn. ${HANDOFF_SECTIONS}`
 
 // A workflow document whose path holds a space, as a Windows path often does.
 const DOC = 'C:\\Docs\\My Workflow.md'
@@ -534,6 +541,7 @@ test('hr_watch keeps a workflowDoc and the resume prompt hands it to the success
   world.percent = 6
   await clock.advance(1500)
   expect(world.submits.length).toBe(1)
+  expect(world.submits[0]).toBe(NUDGE_55_DOC.replace('used 55%', 'used 6%'))
   world.handoffs = [{ name: 'h.md', kind: 'file', size: 1, mtimeMs: clock.now(), isLink: false }]
   await $.turn.complete(mainTurnEnds)
   await clock.advance(3000)
@@ -714,14 +722,8 @@ test('in auto mode with /clear enabled, a seen handoff clears and then hands the
   })
   expect(done.phase).toBe('armed')
   expect(done.waitsForDrop).toBe(true)
-  // No workflow document given: the resume points at the run-state file instead.
-  expect(calls).toEqual([
-    'clear',
-    `[HR] Successor start. Read ${RUN}\\handoffs\\newer.md, ${RUN}\\orchestrator-state.md and ` +
-      "the run-state file's 'how to resume' section in full, check CronList and re-create the " +
-      'heartbeat cron only if it is gone, call the mcp__workflow-orchestrator__hr_watch tool with runFolder ' +
-      `${RUN}, mode auto, threshold 50, then continue from the handoff's next three actions.`,
-  ])
+  // No workflow document given: the resume is generic and names no run-state file.
+  expect(calls).toEqual(['clear', RESUME_NUDGE('newer.md').replace('mode nudge', 'mode auto')])
 
   // A workflow document given: the resume names it and hands it back to the tool.
   const withDoc: string[] = []
@@ -848,10 +850,8 @@ test('/hr-off during a clear keeps the watch off afterwards', async ($, on) => {
 
 // The resume prompt with no workflow document, as both modes send it.
 const RESUME_NUDGE = (handoff: string) =>
-  `[HR] Successor start. Read ${RUN}\\handoffs\\${handoff}, ${RUN}\\orchestrator-state.md and ` +
-  "the run-state file's 'how to resume' section in full, check CronList and re-create the " +
-  'heartbeat cron only if it is gone, call the mcp__workflow-orchestrator__hr_watch tool with runFolder ' +
-  `${RUN}, mode nudge, threshold 50, then continue from the handoff's next three actions.`
+  `[HR] Successor start. Read ${RUN}\\handoffs\\${handoff} in full, call the mcp__workflow-orchestrator__hr_watch ` +
+  `tool with runFolder ${RUN}, mode nudge, threshold 50, then continue from the handoff's next three actions.`
 
 test('in nudge mode, the person running /clear after the handoff gets the resume prompt once, and the watch re-arms', async ($, on) => {
   const store = stateStore(on)
