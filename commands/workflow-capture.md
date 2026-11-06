@@ -38,11 +38,13 @@ When the context watch clears a session mid-run, the work before the clear survi
 the **hand-off** files it had the session write. Gather them before analyzing anything.
 
 1. **Find the run folder.** If the context holds a prompt starting
-   `[HR] Successor start. Read <path>`, the hand-offs folder is the folder of that path.
-   Otherwise glob `<project root>/.runs/*/handoffs/*.md`. If that finds hand-offs under more
-   than one run folder, use `AskUserQuestion` to ask which run this session was, listing the
-   folders with each one's newest file date. If it finds none, say "No hand-offs found;
-   capturing from the context window only" and go to Stage 1.
+   `[HR] Successor start. Read <path>`, the hand-offs folder is the folder of that path; use
+   it without asking. Otherwise glob `<project root>/.runs/*/handoffs/*.md`. If that finds
+   hand-offs, use `AskUserQuestion` to ask which run this session was, **even when only one
+   run folder is found**: a lone folder may be an old, unrelated run. List each folder with
+   its newest file's date, and always include a **none of these** option. If the glob finds
+   none, or the user picks **none of these**, say "No hand-offs found; capturing from the
+   context window only" and go to Stage 1.
 2. **Read every hand-off.** Read every `.md` file in the chosen folder, oldest first by
    modification time. Ignore files that do not end in `.md`; the folder may hold a `.keep`
    placeholder.
