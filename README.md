@@ -2,15 +2,16 @@
 
 A Claude Code plugin for running complicated workflows in long-running Claude Code sessions.
 
-It does two things, and you can use either one alone or both together:
+It has three parts. Use any one alone, or all together:
 
-- **Agent management views.** A side pane that lists every background agent with its model, what it is
-  doing, how long it has run, its tokens and its context. It appears by itself, with no setup.
-- **Pipeline enforcement.** A skill that drives your repository's `docs/WORKFLOW.md` phase by phase, and
-  will not move on until each phase has produced its output and cleared its gate.
+- **Workflows.** You write down your process once, as phases in `docs/WORKFLOW.md`. Claude then follows
+  it phase by phase and stops wherever you said it needs your approval.
+- **The Agents pane.** A side pane that lists every background agent and what it is doing. It needs no
+  setup.
+- **The context watch** ("HR"). When a long session's context fills up, it has Claude write a hand-off
+  file, so a fresh context can carry on from it.
 
-A third part, the context watch, keeps a long-running session going across context resets; see
-[HR for AI](#hr-for-ai--context-cycling-without-losing-the-thread).
+---
 
 ## Install
 
@@ -25,15 +26,106 @@ On Claude Code 2.1.275 or later, one line does both:
 /plugin install workflow-orchestrator --marketplace chrisghughes-alt/workflow-orchestrator
 ```
 
-## Get started
+### Have an agent install it
 
-1. **Install.** Run the two lines above.
-2. **Start any background agent.** The Agents pane opens by itself.
-3. **Type `/hr-watch`.** The context watch is now armed with its defaults.
-4. **If the repo has a `docs/WORKFLOW.md`,** type `/workflow-start <what you want done>`.
-5. **If it does not,** type `/workflow-capture` at the end of a session you would want to repeat. It
-   writes the workflow file for you. It reads the context watch's hand-offs first, so a run the watch
-   cleared can still be captured whole.
+Paste this block into Claude Code, or into another agent, to have it install and check the plugin.
+
+<details>
+<summary>Show the block to paste</summary>
+
+```text
+Install and verify the workflow-orchestrator Claude Code plugin. Follow these steps in order.
+
+1. Run: /plugin marketplace add chrisghughes-alt/workflow-orchestrator
+2. Run: /plugin install workflow-orchestrator
+3. Check the pane: start a trivial background agent (for example, one that replies "ok" and ends).
+   Confirm the Agents pane opened and lists that agent.
+4. Check the skill: confirm workflow-orchestrator:workflow-start appears exactly once in the skill
+   list. If it appears twice, the plugin is loaded twice; stop and tell the user.
+5. Check the tools: call mcp__workflow-orchestrator__agents. Expect a JSON array.
+6. Report the result of each check to the user.
+
+Only if this repository will run fleet workflows, also do the following:
+
+7. Copy examples/Native-Agent-Fleet-WORKFLOW.md from the plugin to docs/<name>-WORKFLOW.md in this
+   repository. Fill every <slot: ...> placeholder with this repository's own details; ask the user
+   for any you cannot find.
+8. Add .runs/ to this repository's .gitignore.
+9. At the start of each run, call mcp__workflow-orchestrator__hr_watch with runFolder set to the
+   absolute path of <repo>/.runs/<run-name> (create it first, with a handoffs/ subfolder), mode set
+   to nudge or auto as the user chooses, and workflowDoc set to the absolute path of
+   docs/<name>-WORKFLOW.md. For an ordinary session with no fleet, call it with no arguments.
+10. At the end of each run, call mcp__workflow-orchestrator__hr_off.
+
+Do not:
+- Edit the user's settings files without asking first.
+- Load the plugin through both the marketplace and CLAUDE_CODE_PLUGIN_DIRS at once. Every command,
+  tool and pane would appear twice.
+```
+
+</details>
+
+---
+
+## Commands at a glance
+
+| Command | Type it when |
+|---|---|
+| `/workflow-capture` | You have just finished a piece of work you would want to repeat. It turns the session into a workflow file. |
+| `/workflow-start <what you want done>` | You want Claude to do a piece of work by following your workflow file. |
+| `/hr-watch` | You are starting a long session and want a hand-off written before the context fills. |
+| `/hr-handoff` | You want that hand-off and a fresh context right now. |
+| `/hr-off` | You want the context watch off. |
+| `/agent-sidebar` | You want the Agents pane open. It also opens by itself when a background agent starts. |
+
+---
+
+## Build your first workflow
+
+You do not write the workflow file by hand. You do the work once, and the plugin writes the file from
+what happened.
+
+1. **Do a piece of work with Claude the way you normally would.** For example: plan a small feature,
+   build it, review it, commit it.
+2. **At the end, in the same session, type `/workflow-capture`.** It lists the phases it saw, what each
+   one produced and where you gave approval. It walks you through them one at a time so you can
+   confirm or change each, then writes `docs/WORKFLOW.md`.
+3. **Next time, type `/workflow-start` and say what you want done:**
+
+   ```text
+   /workflow-start add a CSV export to the reports page
+   ```
+
+Claude now runs your phases in order. A phase must produce its output before the next one starts, and
+at each approval point Claude stops and waits for an explicit yes.
+
+![The engine stopped at a consent gate](docs/images/pipeline-gate.png)
+
+There are two other ways to get a workflow file: run `/workflow-start` in a project that has none and it
+offers to write a starter, or copy [`examples/minimal-WORKFLOW.md`](examples/minimal-WORKFLOW.md). See
+[Getting a workflow](#getting-a-workflow).
+
+---
+
+## What to try next
+
+- **"My session loses the thread when its context fills up."** Type `/hr-watch` once at the start. At
+  50% of the context used, Claude is asked to write a hand-off file. When the pane header shows
+  `HR ready`, type `/clear`, and the fresh context picks up from the hand-off. To do it sooner, or
+  without typing `/clear`, use `/hr-handoff`. More in
+  [HR for AI](#hr-for-ai--context-cycling-without-losing-the-thread).
+- **"I want to see what my background agents are doing."** There is nothing to type. The pane opens the
+  first time a background agent starts. More in [Agent management views](#agent-management-views).
+- **"I want a team of agents to run a workflow while I am away."** Start from the fleet template. More
+  in [Together](#together-running-a-workflow-across-a-fleet).
+
+---
+
+## Reference
+
+Everything below is detail, one part at a time. You do not need to read it to get started.
+
+---
 
 ## Agent management views
 
@@ -60,6 +152,8 @@ The model can read the same roster through a tool:
 |---|---|
 | `mcp__workflow-orchestrator__agents` | Returns the roster as JSON: one row per agent with name, model, status, activity, tokens in and out, context size and timestamps. |
 
+---
+
 ## Pipeline enforcement
 
 The `workflow-start` skill reads your project's `docs/WORKFLOW.md` and drives its phases in order. You
@@ -77,8 +171,6 @@ For each phase, the engine reads the phase's **Orchestrator directives** and run
 3. A consent gate needs an explicit yes. "Looks good" is not consent.
 4. When an invoked skill tries to decide what happens next, the engine's plan wins and control comes
    back to it.
-
-![The engine stopped at a consent gate](docs/images/pipeline-gate.png)
 
 The engine knows nothing about any one project. Your `docs/WORKFLOW.md` names the phases, the skills
 they invoke, the files they produce and the gates they enforce. The plugin supplies only the discipline
@@ -123,6 +215,8 @@ offers at the end to fold them back into the workflow file. Small drift gets a o
 friction gets a short prompt: update inline, hand off to `/workflow-capture`, or dismiss. A clean run
 says nothing.
 
+---
+
 ## HR for AI — context cycling without losing the thread
 
 A long-running session fills its context. Automatic compaction then blurs what it knew. A hand-off
@@ -134,23 +228,31 @@ header, once a second. It watches only the session that armed it, and it is off 
 folder is where the hand-off lands. The plugin looks in that folder only to see the hand-off file
 appear, which is its proof that the hand-off is written.
 
-**How to use it.** Type `/hr-watch` once. With no arguments it uses the folder `<repo>/.runs/hr/`
-(created when needed), nudge mode, and a 50% threshold.
+**How to use it.**
 
-When the gauge reaches 50%, the plugin asks the model for a hand-off. The request tells the model where
-to write the hand-off file and that the file ends with two sections, **Phases run so far** and, last,
-**Next three actions**. The header then shows `HR nudged`.
+1. **Type `/hr-watch` once.** With no arguments it uses the folder `<repo>/.runs/hr/` (created when
+   needed), nudge mode, and a 50% threshold.
 
-![The pane header after the nudge: HR nudged beside the context gauge, with four agents listed](docs/images/hr-nudged.png)
+2. **At 50%, the plugin asks the model for a hand-off.** The request tells the model where to write the
+   hand-off file and that the file ends with two sections, **Phases run so far** and, last,
+   **Next three actions**. The header then shows `HR nudged`.
 
-![The plugin's hand-off request arriving in the conversation as a prompt from the plugin, after the arming reply](docs/images/hr-handoff.png)
+   ![The pane header after the nudge: HR nudged beside the context gauge, with four agents listed](docs/images/hr-nudged.png)
 
-When the header shows `HR ready`, type `/clear`. The plugin puts a resume prompt in front of the new
-context, and the new context continues from the hand-off's "Next three actions".
+   ![The plugin's hand-off request arriving in the conversation as a prompt from the plugin, after the arming reply](docs/images/hr-handoff.png)
 
-![A fresh context whose first prompt is the plugin's resume message, with the same four agents still in the pane](docs/images/hr-resumed.png)
+3. **When the header shows `HR ready`, type `/clear`.** The plugin puts a resume prompt in front of the
+   new context, and the new context continues from the hand-off's "Next three actions".
+
+   ![A fresh context whose first prompt is the plugin's resume message, with the same four agents still in the pane](docs/images/hr-resumed.png)
+
+To hand off before the threshold, or to skip typing `/clear`, type `/hr-handoff`. It asks for the
+hand-off if none is written yet, then clears and resumes for you, this once.
 
 ### Advanced
+
+<details>
+<summary>Auto mode, the tools and commands in full, paths, and what <code>/clear</code> resets</summary>
 
 #### Auto mode
 
@@ -171,6 +273,7 @@ when you are at the keyboard and want to read the hand-off first.
 | `mcp__workflow-orchestrator__hr_off()` | Turns the watch off. |
 | `/hr-watch [<folder>] [nudge\|auto] [key=value …]` | Arms the watch from the prompt. With no folder and no watch on, it uses the defaults above. With no folder while a watch is on, it changes only what you typed: `/hr-watch auto` mid-run switches that same run to auto mode. The keys are `mode`, `threshold` and `doc`. A bare threshold right after the mode word also works. |
 | `/hr-off` | Turns the watch off. |
+| `/hr-handoff` | Hands off now, once, whatever the mode and the gauge. If a hand-off file is already written (the header shows `HR ready`), the plugin runs `/clear` and sends the resume prompt. If not, it asks the model for the hand-off first, then clears and resumes when the file appears. With no watch on, it arms the default one first. The watch keeps its mode afterwards. |
 | `/agent-sidebar` | Opens the Agents pane. |
 
 The reply always states the mode and threshold, for example `HR armed on <folder> (nudge, 50%)`. When a
@@ -203,6 +306,10 @@ The plugin keeps what it needs in process memory, so a clear does not lose the h
 it writes the watch back right after its own clear; in `nudge` mode it notices your `/clear`, sends the
 resume prompt, and arms the watch again. Either way, the new context's `hr_watch` call re-arms it with
 the same arguments.
+
+</details>
+
+---
 
 ## Together: running a workflow across a fleet
 
@@ -248,39 +355,7 @@ These were measured, not assumed:
 - A background agent can call skills but not plugin commands. That is why the engine is the
   `workflow-orchestrator:workflow-start` skill rather than a command.
 
-## For agents installing this plugin
-
-Paste this block into Claude Code, or into another agent, to have it install and check the plugin.
-
-```text
-Install and verify the workflow-orchestrator Claude Code plugin. Follow these steps in order.
-
-1. Run: /plugin marketplace add chrisghughes-alt/workflow-orchestrator
-2. Run: /plugin install workflow-orchestrator
-3. Check the pane: start a trivial background agent (for example, one that replies "ok" and ends).
-   Confirm the Agents pane opened and lists that agent.
-4. Check the skill: confirm workflow-orchestrator:workflow-start appears exactly once in the skill
-   list. If it appears twice, the plugin is loaded twice; stop and tell the user.
-5. Check the tools: call mcp__workflow-orchestrator__agents. Expect a JSON array.
-6. Report the result of each check to the user.
-
-Only if this repository will run fleet workflows, also do the following:
-
-7. Copy examples/Native-Agent-Fleet-WORKFLOW.md from the plugin to docs/<name>-WORKFLOW.md in this
-   repository. Fill every <slot: ...> placeholder with this repository's own details; ask the user
-   for any you cannot find.
-8. Add .runs/ to this repository's .gitignore.
-9. At the start of each run, call mcp__workflow-orchestrator__hr_watch with runFolder set to the
-   absolute path of <repo>/.runs/<run-name> (create it first, with a handoffs/ subfolder), mode set
-   to nudge or auto as the user chooses, and workflowDoc set to the absolute path of
-   docs/<name>-WORKFLOW.md. For an ordinary session with no fleet, call it with no arguments.
-10. At the end of each run, call mcp__workflow-orchestrator__hr_off.
-
-Do not:
-- Edit the user's settings files without asking first.
-- Load the plugin through both the marketplace and CLAUDE_CODE_PLUGIN_DIRS at once. Every command,
-  tool and pane would appear twice.
-```
+---
 
 ## Loading the plugin
 
@@ -293,10 +368,14 @@ Do not:
 Never load both at once. Both copies would register the same commands, tools and pane, and you would see
 each one twice.
 
+---
+
 ## Writing your pipeline
 
 [`docs/authoring-workflows.md`](docs/authoring-workflows.md) covers the directive fields, gates and
 routing. [`examples/README.md`](examples/README.md) explains which example to start from.
+
+---
 
 ## Contributing
 
@@ -307,6 +386,8 @@ routing. [`examples/README.md`](examples/README.md) explains which example to st
 - **The engine is self-contained.** `skills/workflow-start/SKILL.md` must not depend on anything outside
   the target project. It reads the target project's workflow file at runtime and never hard-codes another
   project's phases.
+
+---
 
 ## What's in the box
 
@@ -321,10 +402,14 @@ docs/             the authoring guide and the README images
 examples/         a minimal pipeline, two real sanitized pipelines, and the fleet template
 ```
 
+---
+
 ## Related
 
 Custom agents to compose into your pipeline (the `quality-agents:*` references in the examples come from
 here): **[chrisghughes-alt/ClaudeCodeAgents](https://github.com/chrisghughes-alt/ClaudeCodeAgents)**.
+
+---
 
 ## License
 

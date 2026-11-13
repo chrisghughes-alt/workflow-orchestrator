@@ -41,7 +41,8 @@ export type Gauge = {
 // for a handoff and waits for the file. Then, in nudge mode, `ready`: the
 // handoff exists and the owner runs /clear, after which the plugin sends the
 // resume prompt and goes back to `armed`; in auto mode, `clearing` runs
-// /clear and the resume prompt, then back to `armed`.
+// /clear and the resume prompt, then back to `armed`. /hr-handoff runs that
+// auto path once, now, in either mode.
 export type HrPhase = 'off' | 'armed' | 'nudged' | 'ready' | 'clearing'
 export type HrMode = 'nudge' | 'auto'
 export type Hr = {
@@ -56,6 +57,11 @@ export type Hr = {
   // has read below the threshold, so a context still over it does not ask for
   // a second handoff on the very next poll.
   waitsForDrop?: boolean
+  // Set by /hr-handoff for the one handoff it asks for: the next poll asks the
+  // main loop for it whatever the gauge reads, and when the file appears the
+  // plugin clears and resumes by itself, even in nudge mode. Gone again once
+  // that clear has run.
+  handsOffNow?: boolean
   // The absolute path of the workflow document the successor reads on resume,
   // as given to hr_watch or /hr-watch doc=. Absent: the resume prompt points at
   // the run-state file's "how to resume" section instead.

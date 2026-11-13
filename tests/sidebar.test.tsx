@@ -257,9 +257,9 @@ const RESUME_WITH_DOC = (handoff: string, threshold: number) =>
 type Fs = { name: string; kind: 'file' | 'dir' | 'other'; size: number; mtimeMs: number; isLink: boolean }
 
 // Stands in for the engine under the context watch: a run folder that exists
-// (RUN unless another is given), a gauge the test sets, and a record of every
+// (RUN unless another is given), a project root (ROOT unless another is given), a gauge the test sets, and a record of every
 // prompt, command and toast.
-function hrEngine(on: Parameters<TestBody>[1], run = RUN) {
+function hrEngine(on: Parameters<TestBody>[1], run = RUN, root = ROOT) {
   // The engine may hand a hook a POSIX path resolved on the current drive
   // (/home/u/x as C:\home\u\x on Windows, as observed), or unchanged on macOS
   // and Linux (expected, not yet observed).
@@ -285,7 +285,7 @@ function hrEngine(on: Parameters<TestBody>[1], run = RUN) {
     written: [] as string[],
     dirs: [] as string[],
   }
-  on('session.root', () => ({ value: ROOT }))
+  on('session.root', () => ({ value: root }))
   on('fs.write', (_, e) => {
     world.written.push(e.path)
     // Like the engine, a write creates the folders above the file.
@@ -1254,4 +1254,126 @@ test('switching to auto while ready clears and resumes once, without waiting for
   // The resume that waited for the person's clear is not sent as well.
   await clock.advance(5000)
   expect(world.submits.length).toBe(2)
+})
+
+// The /hr-handoff tests use POSIX paths, so they run the same on every platform.
+const POSIX_ROOT = '/home/u/repo'
+const POSIX_DEFAULT = `${POSIX_ROOT}/.runs/hr`
+const POSIX_RUN = '/home/u/.runs/r1'
+const POSIX_NUDGE_55 =
+  `[HR] Context used 55%. Write the orchestrator handoff to ${POSIX_RUN}/handoffs/orchestrator-handoff-YYYYMMDD-HHMM.md ` +
+  `(use the clock for the stamp), then end your turn. ${HANDOFF_SECTIONS}`
+const POSIX_RESUME =
+  `[HR] Successor start. Read ${POSIX_RUN}/handoffs/h.md in full, call the mcp__workflow-orchestrator__hr_watch ` +
+  `tool with runFolder ${POSIX_RUN}, mode nudge, threshold 50, then continue from the handoff's next three actions.`
+
+test('/hr-handoff with no watch on arms the default folder, asks for the handoff below the threshold, then clears and resumes in nudge mode', async ($, on) => {
+  const store = stateStore(on)
+  const { clock, world } = hrEngine(on, POSIX_DEFAULT, POSIX_ROOT)
+  world.onCommand = command => {
+    if (command !== 'clear') return
+    store.forget('workflow-orchestrator')
+    world.startedAt = clock.now()
+  }
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await clock.advance(1500)
+
+  expect((await $.command.run({ command: 'hr-handoff', args: '' } as never)).text).toBe(
+    'HR: handoff requested; the clear and resume follow once it is written',
+  )
+  expect(world.written.map(p => p.replace(/^[A-Za-z]:/, '').replaceAll('\\', '/'))).toEqual([`${POSIX_DEFAULT}/handoffs/.keep`])
+  await clock.advance(1500)
+  expect(world.submits).toEqual([
+    `[HR] Context used 10%. Write the orchestrator handoff to ${POSIX_DEFAULT}/handoffs/orchestrator-handoff-YYYYMMDD-HHMM.md ` +
+      `(use the clock for the stamp), then end your turn. ${HANDOFF_SECTIONS}`,
+  ])
+  expect(await header($)).toContain('HR nudged')
+  // Asked again with still no file: the request goes out a second time.
+  expect((await $.command.run({ command: 'hr-handoff', args: '' } as never)).text).toBe(
+    'HR: no handoff written yet; requested again, and the clear and resume follow once it is written',
+  )
+  await clock.advance(1500)
+  expect(world.submits.length).toBe(2)
+  expect(world.submits[1]).toBe(world.submits[0])
+  expect(world.commands.filter(c => c === 'clear')).toEqual([])
+
+  world.handoffs = [{ name: 'h.md', kind: 'file', size: 1, mtimeMs: clock.now(), isLink: false }]
+  await $.turn.complete(mainTurnEnds)
+  await clock.advance(3000)
+  expect(world.commands.filter(c => c === 'clear')).toEqual(['clear'])
+  expect(world.submits.length).toBe(3)
+  expect(world.submits[2]).toBe(
+    `[HR] Successor start. Read ${POSIX_DEFAULT}/handoffs/h.md in full, call the mcp__workflow-orchestrator__hr_watch ` +
+      `tool with runFolder ${POSIX_DEFAULT}, mode nudge, threshold 50, then continue from the handoff's next three actions.`,
+  )
+  // Back to a plain nudge-mode watch: the next handoff waits for the person again.
+  expect(await header($)).toContain('HR nudge ·')
+  await clock.advance(5000)
+  expect(world.submits.length).toBe(3)
+})
+
+test('/hr-handoff on a watch whose handoff is already written clears and resumes once, without asking again', async ($, on) => {
+  const store = stateStore(on)
+  const { clock, world } = hrEngine(on, POSIX_RUN)
+  world.onCommand = command => {
+    if (command !== 'clear') return
+    store.forget('workflow-orchestrator')
+    world.startedAt = clock.now()
+  }
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+
+  await $.command.run({ command: 'hr-watch', args: POSIX_RUN } as never)
+  world.percent = 55
+  await clock.advance(1500)
+  world.handoffs = [{ name: 'h.md', kind: 'file', size: 1, mtimeMs: clock.now(), isLink: false }]
+  await $.turn.complete(mainTurnEnds)
+  await clock.advance(1500)
+  expect(await header($)).toContain('HR ready')
+
+  expect((await $.command.run({ command: 'hr-handoff', args: '' } as never)).text).toBe(
+    `HR: handoff written at ${POSIX_RUN}/handoffs/h.md; clearing and resuming`,
+  )
+  await clock.advance(3000)
+  expect(world.commands.filter(c => c === 'clear')).toEqual(['clear'])
+  expect(world.submits).toEqual([POSIX_NUDGE_55, POSIX_RESUME])
+  expect(await header($)).toContain('HR nudge ·')
+  // The resume that waited for the person's clear is not sent as well.
+  await clock.advance(5000)
+  expect(world.submits.length).toBe(2)
+})
+
+test('/hr-handoff after the nudge clears straight away when the file is already there', async ($, on) => {
+  const { clock, world } = hrEngine(on, POSIX_RUN)
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+
+  await $.command.run({ command: 'hr-watch', args: POSIX_RUN } as never)
+  world.percent = 55
+  await clock.advance(1500)
+  expect(world.submits).toEqual([POSIX_NUDGE_55])
+  // Written, but no main turn has ended since, so the watch has not seen it.
+  world.handoffs = [{ name: 'h.md', kind: 'file', size: 1, mtimeMs: clock.now(), isLink: false }]
+  expect((await $.command.run({ command: 'hr-handoff', args: '' } as never)).text).toBe(
+    `HR: handoff written at ${POSIX_RUN}/handoffs/h.md; clearing and resuming`,
+  )
+  await clock.advance(3000)
+  expect(world.commands.filter(c => c === 'clear')).toEqual(['clear'])
+  expect(world.submits).toEqual([POSIX_NUDGE_55, POSIX_RESUME])
+})
+
+test('the one-time clear /hr-handoff asks for works in nudge mode and is gone after the clear', async () => {
+  const nudged: Hr = { runFolder: RUN, phase: 'nudged', mode: 'nudge', threshold: 50, nudgedAt: 5000, handsOffNow: true }
+  const io = {
+    list: async () => [{ name: 'h.md', kind: 'file', size: 1, mtimeMs: 6000, isLink: false }],
+    toast: () => undefined,
+  }
+  const seen = await seeHandoff(nudged, io, true)
+  expect(seen.phase).toBe('clearing')
+  // With /clear disabled it can only reach ready.
+  const ready = await seeHandoff(nudged, io, false)
+  expect(ready.phase).toBe('ready')
+  expect(ready.handsOffNow).toBeUndefined()
+  const done = await finishClear(seen, { clear: async () => undefined, submit: async () => undefined, toast: () => undefined })
+  expect(done.phase).toBe('armed')
+  expect(done.mode).toBe('nudge')
+  expect(done.handsOffNow).toBeUndefined()
 })

@@ -45,6 +45,10 @@ event's bare result.
   a hook the turn waits on. `turn.complete` only notices the new handoff file and moves the watch on.
   The clear and the resume prompt run from the poll, which is a timer, not a hook. A flag guards
   against two clears overlapping.
+- **Neither a prompt nor `/clear` runs from a `command.run` hook.** The engine refuses
+  `$.prompt.submit` there too ("it would wait on the turn this hook is holding"). So `/hr-handoff`
+  only writes the watch's state (`handsOffNow`, or `clearing` when the hand-off is already written),
+  and the poll sends the request and runs the clear.
 - **The nudge is not awaited.** `$.prompt.submit` runs a turn of its own once the session is idle, so
   awaiting it inside the poll could hang the poll. The watch moves to its "nudged" state before the
   submit, which is what stops a second nudge. If the submit rejects, the watch shows a toast and turns

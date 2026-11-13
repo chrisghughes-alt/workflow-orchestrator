@@ -25,6 +25,7 @@ const CLEAR_ENABLED = true
 const AUTO_DISABLED_TEXT = 'auto mode is not enabled in this build yet; armed in nudge mode'
 const HR_WATCH = 'hr-watch'
 const HR_OFF = 'hr-off'
+const HR_HANDOFF = 'hr-handoff'
 
 // Change the tag when AgentRow's fields change: a reload keeps what the old
 // code stored, and the tag makes the new code start fresh instead of misreading it.
@@ -58,9 +59,11 @@ const HANDOFF_SECTIONS =
   "what it produced, what approval it waited on; carry the previous handoff's lines forward) and, last, " +
   '"Next three actions".'
 
-function nudgeText(percent: number, runFolder: string, workflowDoc: string | undefined): string {
+// The percent is unknown when /hr-handoff asks before the gauge's first reading.
+function nudgeText(percent: number | undefined, runFolder: string, workflowDoc: string | undefined): string {
   const handoff = within(within(runFolder, 'handoffs'), 'orchestrator-handoff-YYYYMMDD-HHMM.md')
-  const head = `[HR] Context used ${Math.round(percent)}%. Write the orchestrator handoff to ${handoff} `
+  const used = percent === undefined ? 'Handoff requested.' : `Context used ${Math.round(percent)}%.`
+  const head = `[HR] ${used} Write the orchestrator handoff to ${handoff} `
   // With a workflow document, its run-state file and handoff rules apply.
   const middle =
     workflowDoc === undefined
@@ -105,8 +108,9 @@ type HandoffIo = {
 
 // After the main loop's turn ends while nudged: looks for a handoff written
 // since the nudge (the newest .md in the run's handoffs folder). None: still
-// nudged. Found: in auto mode with /clear enabled, the next poll clears and
-// resumes; otherwise the watch is ready and waits for the owner to clear.
+// nudged. Found: in auto mode, or when /hr-handoff asked for this one handoff,
+// with /clear enabled, the next poll clears and resumes; otherwise the watch is
+// ready and waits for the owner to clear.
 export async function seeHandoff(state: Hr, io: HandoffIo, clearEnabled: boolean): Promise<Hr> {
   if (state.phase !== 'nudged') return state
   const since = state.nudgedAt ?? 0
@@ -117,9 +121,10 @@ export async function seeHandoff(state: Hr, io: HandoffIo, clearEnabled: boolean
     .sort((a, b) => b.mtimeMs - a.mtimeMs)[0]
   if (newest === undefined) return state
   const handoffPath = within(folder, newest.name)
-  if (modeOf(state) === 'auto' && clearEnabled) return { ...state, handoffPath, phase: 'clearing' }
+  if ((modeOf(state) === 'auto' || state.handsOffNow) && clearEnabled) return { ...state, handoffPath, phase: 'clearing' }
   io.toast('HR: handoff written; run /clear when ready')
-  return { ...state, handoffPath, phase: 'ready' }
+  // /hr-handoff's request ends here when the plugin cannot clear by itself.
+  return { ...state, handoffPath, phase: 'ready', handsOffNow: undefined }
 }
 
 type ClearIo = {
@@ -130,7 +135,8 @@ type ClearIo = {
 
 // Clears the conversation, then hands the fresh one its start prompt. Run from
 // the poll, never from a hook the turn waits on, where the engine refuses a
-// slash command. Either way it ends armed.
+// slash command. Either way it ends armed, in the mode it had: /hr-handoff's
+// one-time clear does not carry over to the next handoff.
 export async function finishClear(state: Hr, io: ClearIo): Promise<Hr> {
   try {
     await io.clear()
@@ -138,7 +144,7 @@ export async function finishClear(state: Hr, io: ClearIo): Promise<Hr> {
   } catch (error) {
     io.toast(`HR: clear and resume failed: ${error instanceof Error ? error.message : String(error)}`)
   }
-  return { ...state, phase: 'armed', waitsForDrop: true }
+  return { ...state, phase: 'armed', waitsForDrop: true, handsOffNow: undefined }
 }
 
 // The whole engine interface: the helpers below read files, the session and the UI, not only stored values.
@@ -421,6 +427,80 @@ async function disarmWatch($: Dollar): Promise<string> {
   return 'HR off'
 }
 
+// Sends the handoff request for a watch already moved to nudged. Not awaited:
+// the submit runs a turn of its own once the session is idle. If it fails, the
+// watch turns off, so it cannot wait for a file nobody was asked to write.
+function sendNudge($: Dollar, percent: number | undefined, state: Hr): void {
+  void $.prompt.submit({ text: nudgeText(percent, state.runFolder, state.workflowDoc) }).catch(async (error: unknown) => {
+    $.ui.toast(`HR: the handoff nudge failed, watch off: ${error instanceof Error ? error.message : String(error)}`)
+    await update($, hr, (cur: Hr): Hr => (cur.phase === 'nudged' ? { ...cur, phase: 'off' } : cur))
+  })
+}
+
+// /hr-handoff: the handoff auto mode would do at the threshold, now, once,
+// whatever the mode and the gauge. A handoff already written (the watch is
+// ready, or a file has appeared since the nudge) is cleared and resumed from;
+// otherwise the main loop is asked for one (again, if an earlier request
+// produced no file), and the clear and resume follow
+// when the file appears. With no watch on, it first arms the default folder,
+// as a bare /hr-watch does. Both the request and the clear run from the poll,
+// never here: the engine refuses a prompt or a slash command from inside a
+// command's own hook. The watch keeps its mode, so the resume prompt re-arms
+// what the person had.
+async function handOffNow($: Dollar): Promise<string> {
+  // Mid-clear the store reads as off; arming the default folder now would be wrong.
+  if (isClearing) return 'HR: a clear and resume is already under way'
+  if (!isOn(await read($, hr))) {
+    const reply = await armWatch($, '', undefined)
+    if (!isOn(await read($, hr))) return reply
+  }
+  let before: Hr | undefined
+  let stored: Hr | undefined
+  await update($, hr, (cur: Hr) => {
+    before = cur
+    stored = undefined
+    if (!isOn(cur) || cur.phase === 'clearing') return cur
+    if (cur.phase === 'ready') stored = CLEAR_ENABLED ? { ...cur, phase: 'clearing' } : cur
+    else if (cur.phase === 'nudged') stored = { ...cur, handsOffNow: true }
+    else stored = { ...cur, handsOffNow: true }
+    return stored
+  })
+  if (before?.phase === 'clearing') return 'HR: a clear and resume is already under way'
+  if (before === undefined || stored === undefined) return 'HR: the watch changed while this ran. Nothing was done; try again.'
+  if (before.phase === 'armed') {
+    return CLEAR_ENABLED
+      ? 'HR: handoff requested; the clear and resume follow once it is written'
+      : 'HR: handoff requested; run /clear once it is written'
+  }
+  if (before.phase === 'nudged') {
+    // The file may already be there: nothing else looks until a main turn ends.
+    const asked = stored
+    const seen = await seeHandoff(
+      asked,
+      { list: path => $.fs.list(path), toast: text => $.ui.toast(text) },
+      CLEAR_ENABLED,
+    ).catch(() => asked)
+    if (seen === asked) {
+      // Asked before, yet the turn ended with no file: back to armed with the
+      // flag kept, so the next poll asks again.
+      await update($, hr, (cur: Hr) => (cur.phase === 'nudged' ? { ...cur, phase: 'armed' } : cur))
+      return 'HR: no handoff written yet; requested again, and the clear and resume follow once it is written'
+    }
+    let isStored = false
+    await update($, hr, (cur: Hr) => {
+      isStored = cur.phase === 'nudged'
+      return isStored ? seen : cur
+    })
+    if (isStored && seen.phase === 'ready') pendingResume = seen
+    stored = seen
+  }
+  if (stored.phase !== 'clearing') return 'HR: handoff written; run /clear when ready'
+  // The plugin's own clear sends the resume prompt, so the one waiting for the
+  // person's clear is dropped; kept, the clear would send it a second time.
+  pendingResume = undefined
+  return `HR: handoff written at ${stored.handoffPath ?? ''}; clearing and resuming`
+}
+
 const DONE = new Set(['completed', 'failed', 'killed'])
 
 function blank(id: string, at: number): AgentRow {
@@ -587,6 +667,13 @@ export const register: Register = on => {
       })
       .catch(() => undefined)
     await $.command.register({ name: HR_OFF, description: 'Turn the context watch off' }).catch(() => undefined)
+    await $.command
+      .register({
+        name: HR_HANDOFF,
+        description:
+          'Hand off now: make sure a hand-off file is written (asking for one if not), then clear and resume, once, whatever the mode',
+      })
+      .catch(() => undefined)
     // The pane is not opened here: the poll opens it when the first background
     // agent appears, and /agent-sidebar opens it any time.
     // A failed registration costs the model the tool, never the sidebar its poll.
@@ -644,10 +731,12 @@ export const register: Register = on => {
     // goes, so a later poll never sends a second one.
     const nudgeAtThreshold = async (reading: Gauge) => {
       const percent = reading.percent
-      if (percent === undefined) return
       const seen = await read($, hr)
       if (seen.phase !== 'armed') return
-      if (seen.waitsForDrop) {
+      // /hr-handoff asked: the gauge and the wait for a drop do not matter.
+      const isAsked = (cur: Hr) => cur.handsOffNow === true
+      if (percent === undefined && !isAsked(seen)) return
+      if (!isAsked(seen) && percent !== undefined && seen.waitsForDrop) {
         if (percent < seen.threshold) {
           await update($, hr, (cur: Hr) =>
             cur.phase === 'armed' ? { ...cur, waitsForDrop: undefined } : cur,
@@ -655,21 +744,18 @@ export const register: Register = on => {
         }
         return
       }
-      if (percent < seen.threshold) return
+      if (!isAsked(seen) && (percent === undefined || percent < seen.threshold)) return
       const at = await $.clock.now()
       let state: Hr | undefined
       await update($, hr, (cur: Hr) => {
         state = undefined
-        if (cur.phase !== 'armed' || cur.waitsForDrop || percent < cur.threshold) return cur
+        const isDue = percent !== undefined && !cur.waitsForDrop && percent >= cur.threshold
+        if (cur.phase !== 'armed' || !(isAsked(cur) || isDue)) return cur
         state = { ...cur, phase: 'nudged', nudgedAt: at, handoffPath: undefined }
         return state
       })
       if (state === undefined) return
-      const runFolder = state.runFolder
-      void $.prompt.submit({ text: nudgeText(percent, runFolder, state.workflowDoc) }).catch(async (error: unknown) => {
-        $.ui.toast(`HR: the handoff nudge failed, watch off: ${error instanceof Error ? error.message : String(error)}`)
-        await update($, hr, (cur: Hr): Hr => (cur.phase === 'nudged' ? { ...cur, phase: 'off' } : cur))
-      })
+      sendNudge($, percent, state)
     }
 
     // Nudge mode, after the person's /clear: the same resume prompt auto mode
@@ -776,7 +862,11 @@ export const register: Register = on => {
     text: 'HR: the watch could not be turned off.',
   }))
 
-  // The same two functions as the commands above, for the model: the reply
+  on('command.run', { command: HR_HANDOFF }, async $ => ({ text: await handOffNow($) })).catch(() => ({
+    text: 'HR: the handoff could not be started.',
+  }))
+
+  // The functions behind /hr-watch and /hr-off again, for the model: the reply
   // text comes back as the tool's result.
   on('tool.call', { tool: 'mcp__workflow-orchestrator__hr_watch' }, async ($, e) => {
     const input = e as unknown as { runFolder?: unknown; mode?: unknown; threshold?: unknown; workflowDoc?: unknown }

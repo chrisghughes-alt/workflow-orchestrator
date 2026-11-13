@@ -3,6 +3,19 @@
 All notable changes to this project are documented here. This project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## [2.3.0] — 2026-11-12
+
+### Added
+- `/hr-handoff`: a manual hand-off. It makes sure a hand-off file is written, asking the model for
+  one if not, then runs `/clear` and sends the resume prompt, once, whatever the watch's mode and
+  the gauge. With no watch on it arms the default one first; the watch keeps its mode afterwards.
+
+### Changed
+- The README leads with what each command is for and a walkthrough for building a first workflow,
+  then short "what to try next" scenarios. The agent-install block sits under Install, the context
+  watch's use is three numbered steps, and its advanced detail is folded. Everything else is under
+  a Reference heading, unchanged.
+
 ## [2.2.1] — 2026-11-06
 
 ### Fixed
