@@ -3,7 +3,7 @@
 All notable changes to this project are documented here. This project adheres to
 [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [2.4.0] — 2026-11-12
 
 ### Changed
 - The context watch treats an old hand-off as stale: more than 5 minutes old, with at least one turn
