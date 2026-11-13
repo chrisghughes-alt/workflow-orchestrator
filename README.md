@@ -249,6 +249,11 @@ appear, which is its proof that the hand-off is written.
 To hand off before the threshold, or to skip typing `/clear`, type `/hr-handoff`. It asks for the
 hand-off if none is written yet, then clears and resumes for you, this once.
 
+If you keep working after the hand-off is written, it goes stale: more than 5 minutes old, with at
+least one turn finished since. The header then shows `HR ready (stale)`. `/hr-handoff`, and switching
+the watch to auto, ask for a fresh hand-off before clearing. Typing `/clear` yourself still resumes
+from the old one.
+
 ### Advanced
 
 <details>
@@ -273,7 +278,7 @@ when you are at the keyboard and want to read the hand-off first.
 | `mcp__workflow-orchestrator__hr_off()` | Turns the watch off. |
 | `/hr-watch [<folder>] [nudge\|auto] [key=value …]` | Arms the watch from the prompt. With no folder and no watch on, it uses the defaults above. With no folder while a watch is on, it changes only what you typed: `/hr-watch auto` mid-run switches that same run to auto mode. The keys are `mode`, `threshold` and `doc`. A bare threshold right after the mode word also works. |
 | `/hr-off` | Turns the watch off. |
-| `/hr-handoff` | Hands off now, once, whatever the mode and the gauge. If a hand-off file is already written (the header shows `HR ready`), the plugin runs `/clear` and sends the resume prompt. If not, it asks the model for the hand-off first, then clears and resumes when the file appears. With no watch on, it arms the default one first. The watch keeps its mode afterwards. |
+| `/hr-handoff` | Hands off now, once, whatever the mode and the gauge. If a hand-off file is already written (the header shows `HR ready`), the plugin runs `/clear` and sends the resume prompt. If not, it asks the model for the hand-off first, then clears and resumes when the file appears. With no watch on, it arms the default one first. The watch keeps its mode afterwards. If that hand-off is stale (over 5 minutes old, with a turn finished since), it is rewritten first. |
 | `/agent-sidebar` | Opens the Agents pane. |
 
 The reply always states the mode and threshold, for example `HR armed on <folder> (nudge, 50%)`. When a

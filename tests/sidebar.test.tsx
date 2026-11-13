@@ -2,7 +2,7 @@ import { expect, mock, test } from 'claude-code/testing'
 import type { TestBody } from 'claude-code/testing'
 import type { AgentInfo } from 'claude-code'
 
-import { finishClear, seeHandoff } from '../hooks/register'
+import { finishClear, isStaleHandoff, seeHandoff } from '../hooks/register'
 import type { Hr } from '../types'
 
 const PANE = {
@@ -1385,4 +1385,152 @@ test('the one-time clear /hr-handoff asks for works in nudge mode and is gone af
   expect(done.phase).toBe('armed')
   expect(done.mode).toBe('nudge')
   expect(done.handsOffNow).toBeUndefined()
+})
+
+const STALE_MS = 5 * 60_000
+const STALE_TOAST = 'HR: the handoff is over 5 minutes old and work has gone on since; /hr-handoff writes a fresh one'
+const STALE_REPLY =
+  'HR: the handoff is stale; a fresh one is requested, and the clear and resume follow once it is written'
+
+test('isStaleHandoff needs ready, work since, and an age strictly over five minutes', () => {
+  const ready: Hr = { runFolder: RUN, phase: 'ready', threshold: 50, handoffAt: 1000, workedSince: true }
+  expect(isStaleHandoff({ ...ready, phase: 'armed' }, 1000 + STALE_MS + 1)).toBe(false)
+  expect(isStaleHandoff({ ...ready, workedSince: undefined }, 1000 + STALE_MS + 1)).toBe(false)
+  expect(isStaleHandoff({ ...ready, handoffAt: undefined }, 1000 + STALE_MS + 1)).toBe(false)
+  expect(isStaleHandoff(ready, 1000 + STALE_MS)).toBe(false)
+  expect(isStaleHandoff(ready, 1000 + STALE_MS + 1)).toBe(true)
+})
+
+// A nudge-mode watch at ready on h.md, with the engine's clear wired to wipe the store.
+async function readyWatch($: Parameters<TestBody>[0], on: Parameters<TestBody>[1]) {
+  const store = stateStore(on)
+  const { clock, world } = hrEngine(on, POSIX_RUN)
+  world.onCommand = command => {
+    if (command !== 'clear') return
+    store.forget('workflow-orchestrator')
+    world.startedAt = clock.now()
+  }
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await $.command.run({ command: 'hr-watch', args: POSIX_RUN } as never)
+  world.percent = 55
+  await clock.advance(1500)
+  world.handoffs = [{ name: 'h.md', kind: 'file', size: 1, mtimeMs: clock.now(), isLink: false }]
+  await $.turn.complete(mainTurnEnds)
+  await clock.advance(1500)
+  expect(await header($)).toContain('HR ready')
+  return { clock, world, store }
+}
+
+test('a stale hand-off shows in the header, toasts once, and /hr-handoff asks for a fresh one before clearing', async ($, on) => {
+  const { clock, world } = await readyWatch($, on)
+  await $.turn.complete(mainTurnEnds)
+  await clock.advance(6 * 60_000)
+  expect(await header($)).toContain('HR ready (stale)')
+  await clock.advance(5000)
+  expect(world.toasts.filter(t => t === JSON.stringify({ text: STALE_TOAST }))).toHaveLength(1)
+
+  expect((await $.command.run({ command: 'hr-handoff', args: '' } as never)).text).toBe(STALE_REPLY)
+  expect(world.commands.filter(c => c === 'clear')).toEqual([])
+  await clock.advance(1500)
+  expect(world.submits).toEqual([POSIX_NUDGE_55, POSIX_NUDGE_55])
+  expect(world.commands.filter(c => c === 'clear')).toEqual([])
+
+  world.handoffs = [{ name: 'h2.md', kind: 'file', size: 1, mtimeMs: clock.now(), isLink: false }]
+  await $.turn.complete(mainTurnEnds)
+  await clock.advance(3000)
+  expect(world.commands.filter(c => c === 'clear')).toEqual(['clear'])
+  expect(world.submits).toHaveLength(3)
+  expect(world.submits[2]).toContain(`Read ${POSIX_RUN}/handoffs/h2.md in full`)
+  await clock.advance(5000)
+  expect(world.commands.filter(c => c === 'clear')).toEqual(['clear'])
+  expect(world.submits).toHaveLength(3)
+  // After the clear it is a plain watch again, and the old resume is not sent.
+  const after = await header($)
+  expect(after).toContain('HR nudge ·')
+  expect(after).not.toContain('(stale)')
+  await clock.advance(5000)
+  expect(world.submits).toHaveLength(3)
+  expect(world.toasts.filter(t => t === JSON.stringify({ text: STALE_TOAST }))).toHaveLength(1)
+})
+
+test('an old hand-off with no main turn since is not stale, and /hr-handoff clears on it', async ($, on) => {
+  const { clock, world } = await readyWatch($, on)
+  await clock.advance(6 * 60_000)
+  const text = await header($)
+  expect(text).toContain('HR ready')
+  expect(text).not.toContain('(stale)')
+  expect(world.toasts.filter(t => t === JSON.stringify({ text: STALE_TOAST }))).toEqual([])
+  expect((await $.command.run({ command: 'hr-handoff', args: '' } as never)).text).toBe(
+    `HR: handoff written at ${POSIX_RUN}/handoffs/h.md; clearing and resuming`,
+  )
+  await clock.advance(3000)
+  expect(world.commands.filter(c => c === 'clear')).toEqual(['clear'])
+  expect(world.submits).toEqual([POSIX_NUDGE_55, POSIX_RESUME])
+})
+
+test('a hand-off with work since but only two minutes old is not stale, and /hr-handoff clears on it', async ($, on) => {
+  const { clock, world } = await readyWatch($, on)
+  await $.turn.complete(mainTurnEnds)
+  await clock.advance(2 * 60_000)
+  expect(await header($)).not.toContain('(stale)')
+  expect((await $.command.run({ command: 'hr-handoff', args: '' } as never)).text).toBe(
+    `HR: handoff written at ${POSIX_RUN}/handoffs/h.md; clearing and resuming`,
+  )
+  await clock.advance(3000)
+  expect(world.commands.filter(c => c === 'clear')).toEqual(['clear'])
+  expect(world.submits).toEqual([POSIX_NUDGE_55, POSIX_RESUME])
+})
+
+test('switching a stale ready watch to auto asks for a fresh hand-off, then clears on the new one', async ($, on) => {
+  const { clock, world } = await readyWatch($, on)
+  await $.turn.complete(mainTurnEnds)
+  await clock.advance(6 * 60_000)
+  expect(await header($)).toContain('HR ready (stale)')
+
+  expect((await $.command.run({ command: 'hr-watch', args: 'auto' } as never)).text).toBe(`HR armed on ${POSIX_RUN} (auto, 50%)`)
+  await clock.advance(3000)
+  expect(world.commands.filter(c => c === 'clear')).toEqual([])
+  expect(world.submits).toEqual([POSIX_NUDGE_55, POSIX_NUDGE_55])
+
+  world.handoffs = [{ name: 'h2.md', kind: 'file', size: 1, mtimeMs: clock.now(), isLink: false }]
+  await $.turn.complete(mainTurnEnds)
+  await clock.advance(3000)
+  expect(world.commands.filter(c => c === 'clear')).toEqual(['clear'])
+  expect(world.submits).toHaveLength(3)
+  expect(world.submits[2]).toContain(`Read ${POSIX_RUN}/handoffs/h2.md in full`)
+  expect(world.submits[2]).toContain('mode auto')
+  await clock.advance(5000)
+  expect(world.commands.filter(c => c === 'clear')).toEqual(['clear'])
+  expect(world.submits).toHaveLength(3)
+})
+
+test('a stale ready watch: the person running /clear gets the resume from the old hand-off, once', async ($, on) => {
+  const { clock, world, store } = await readyWatch($, on)
+  await $.turn.complete(mainTurnEnds)
+  await clock.advance(6 * 60_000)
+  expect(await header($)).toContain('HR ready (stale)')
+
+  store.forget('workflow-orchestrator')
+  world.startedAt = clock.now()
+  await clock.advance(1500)
+  expect(world.submits).toEqual([POSIX_NUDGE_55, POSIX_RESUME])
+  expect(await header($)).not.toContain('(stale)')
+  await clock.advance(5000)
+  expect(world.submits).toHaveLength(2)
+})
+
+test('a stale ready watch, /hr-handoff, then the person runs /clear before the new file: the old hand-off resumes, once', async ($, on) => {
+  const { clock, world, store } = await readyWatch($, on)
+  await $.turn.complete(mainTurnEnds)
+  await clock.advance(6 * 60_000)
+  expect((await $.command.run({ command: 'hr-handoff', args: '' } as never)).text).toBe(STALE_REPLY)
+
+  store.forget('workflow-orchestrator')
+  world.startedAt = clock.now()
+  await clock.advance(1500)
+  expect(world.submits.filter(s => s === POSIX_RESUME)).toHaveLength(1)
+  expect(world.submits[world.submits.length - 1]).toBe(POSIX_RESUME)
+  const count = world.submits.length
+  await clock.advance(5000)
+  expect(world.submits).toHaveLength(count)
 })

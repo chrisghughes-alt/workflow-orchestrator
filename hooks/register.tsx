@@ -26,6 +26,12 @@ const AUTO_DISABLED_TEXT = 'auto mode is not enabled in this build yet; armed in
 const HR_WATCH = 'hr-watch'
 const HR_OFF = 'hr-off'
 const HR_HANDOFF = 'hr-handoff'
+// A hand-off older than this, with work since, is stale: a fresh one is written before a clear.
+const HR_STALE_MS = 5 * 60_000
+const HR_STALE_TOAST =
+  'HR: the handoff is over 5 minutes old and work has gone on since; /hr-handoff writes a fresh one'
+const HR_STALE_REPLY =
+  'HR: the handoff is stale; a fresh one is requested, and the clear and resume follow once it is written'
 
 // Change the tag when AgentRow's fields change: a reload keeps what the old
 // code stored, and the tag makes the new code start fresh instead of misreading it.
@@ -101,6 +107,32 @@ function within(folder: string, name: string): string {
   return folder.endsWith(sep) ? `${folder}${name}` : `${folder}${sep}${name}`
 }
 
+// Whether a ready watch's hand-off is stale: more than HR_STALE_MS old at `at`,
+// and a main turn has ended since it was seen. Age alone is not stale.
+export function isStaleHandoff(state: Hr, at: number): boolean {
+  return (
+    state.phase === 'ready' &&
+    state.workedSince === true &&
+    state.handoffAt !== undefined &&
+    at - state.handoffAt > HR_STALE_MS
+  )
+}
+
+// A ready watch whose stale hand-off is to be replaced: back to armed with the
+// request flag set, so the next poll asks the model for a fresh hand-off and
+// the clear follows when that file appears. The old file's record is dropped.
+function askFresh(state: Hr): Hr {
+  return {
+    ...state,
+    phase: 'armed',
+    handsOffNow: true,
+    handoffPath: undefined,
+    handoffAt: undefined,
+    workedSince: undefined,
+    isStale: undefined,
+  }
+}
+
 type HandoffIo = {
   list: (path: string) => Promise<readonly { name: string; kind: string; mtimeMs: number }[]>
   toast: (text: string) => void
@@ -121,10 +153,11 @@ export async function seeHandoff(state: Hr, io: HandoffIo, clearEnabled: boolean
     .sort((a, b) => b.mtimeMs - a.mtimeMs)[0]
   if (newest === undefined) return state
   const handoffPath = within(folder, newest.name)
-  if ((modeOf(state) === 'auto' || state.handsOffNow) && clearEnabled) return { ...state, handoffPath, phase: 'clearing' }
+  const seen = { handoffPath, handoffAt: newest.mtimeMs, workedSince: undefined, isStale: undefined }
+  if ((modeOf(state) === 'auto' || state.handsOffNow) && clearEnabled) return { ...state, ...seen, phase: 'clearing' }
   io.toast('HR: handoff written; run /clear when ready')
   // /hr-handoff's request ends here when the plugin cannot clear by itself.
-  return { ...state, handoffPath, phase: 'ready', handsOffNow: undefined }
+  return { ...state, ...seen, phase: 'ready', handsOffNow: undefined }
 }
 
 type ClearIo = {
@@ -144,7 +177,15 @@ export async function finishClear(state: Hr, io: ClearIo): Promise<Hr> {
   } catch (error) {
     io.toast(`HR: clear and resume failed: ${error instanceof Error ? error.message : String(error)}`)
   }
-  return { ...state, phase: 'armed', waitsForDrop: true, handsOffNow: undefined }
+  return {
+    ...state,
+    phase: 'armed',
+    waitsForDrop: true,
+    handsOffNow: undefined,
+    handoffAt: undefined,
+    workedSince: undefined,
+    isStale: undefined,
+  }
 }
 
 // The whole engine interface: the helpers below read files, the session and the UI, not only stored values.
@@ -319,21 +360,30 @@ async function changeWatch(
     ...(isThreshold(threshold) ? { threshold } : {}),
     ...(doc === undefined ? {} : { workflowDoc: doc }),
   }
+  const at = await $.clock.now()
   let stored: Hr | undefined
+  let isLeavingReady = false
   await update($, hr, (cur: Hr) => {
     stored = undefined
+    isLeavingReady = false
     // Turned off, or re-pointed, since it was read: leave it as it now is.
     if (!isOn(cur) || cur.runFolder !== path) return cur
     const changed: Hr = { ...cur, ...asked }
     // Waiting for the person's /clear and now in auto mode: the next poll
     // clears and resumes, as auto mode would have once the handoff was seen.
-    stored = changed.phase === 'ready' && modeOf(changed) === 'auto' ? { ...changed, phase: 'clearing' } : changed
+    // A stale handoff is not cleared on: a fresh one is asked for first.
+    if (changed.phase === 'ready' && modeOf(changed) === 'auto') {
+      isLeavingReady = true
+      stored = isStaleHandoff(changed, at) ? askFresh(changed) : { ...changed, phase: 'clearing' }
+    } else stored = changed
     return stored
   })
   if (stored === undefined) return 'HR: the watch changed while this ran. It is unchanged; try again.'
   // The plugin's own clear sends the resume prompt, so the one waiting for the
   // person's clear is dropped; kept, the clear would send it a second time.
-  if (stored.phase === 'clearing') pendingResume = undefined
+  // A stale handoff is not cleared on yet: its resume stays until the fresh
+  // file is seen, so the person's own /clear in between still resumes.
+  if (isLeavingReady && stored.phase === 'clearing') pendingResume = undefined
   else if (pendingResume !== undefined) pendingResume = { ...pendingResume, ...asked }
   if (mode === 'auto' && !CLEAR_ENABLED) return AUTO_DISABLED_TEXT
   return armedText(path, stored)
@@ -454,19 +504,29 @@ async function handOffNow($: Dollar): Promise<string> {
     const reply = await armWatch($, '', undefined)
     if (!isOn(await read($, hr))) return reply
   }
+  const at = await $.clock.now()
   let before: Hr | undefined
   let stored: Hr | undefined
+  let isStale = false
   await update($, hr, (cur: Hr) => {
     before = cur
     stored = undefined
+    isStale = false
     if (!isOn(cur) || cur.phase === 'clearing') return cur
-    if (cur.phase === 'ready') stored = CLEAR_ENABLED ? { ...cur, phase: 'clearing' } : cur
+    if (cur.phase === 'ready' && isStaleHandoff(cur, at)) {
+      // Old, with work since: a fresh handoff is asked for before any clear.
+      isStale = true
+      stored = askFresh(cur)
+    } else if (cur.phase === 'ready') stored = CLEAR_ENABLED ? { ...cur, phase: 'clearing' } : cur
     else if (cur.phase === 'nudged') stored = { ...cur, handsOffNow: true }
     else stored = { ...cur, handsOffNow: true }
     return stored
   })
   if (before?.phase === 'clearing') return 'HR: a clear and resume is already under way'
   if (before === undefined || stored === undefined) return 'HR: the watch changed while this ran. Nothing was done; try again.'
+  // The old resume is kept until the fresh handoff is seen: if the person
+  // types /clear first, it still resumes from the old file.
+  if (isStale) return HR_STALE_REPLY
   if (before.phase === 'armed') {
     return CLEAR_ENABLED
       ? 'HR: handoff requested; the clear and resume follow once it is written'
@@ -483,7 +543,7 @@ async function handOffNow($: Dollar): Promise<string> {
     if (seen === asked) {
       // Asked before, yet the turn ended with no file: back to armed with the
       // flag kept, so the next poll asks again.
-      await update($, hr, (cur: Hr) => (cur.phase === 'nudged' ? { ...cur, phase: 'armed' } : cur))
+      await update($, hr, (cur: Hr): Hr => (cur.phase === 'nudged' ? { ...cur, phase: 'armed' } : cur))
       return 'HR: no handoff written yet; requested again, and the clear and resume follow once it is written'
     }
     let isStored = false
@@ -768,7 +828,15 @@ export const register: Register = on => {
       const state = pendingResume
       pendingResume = undefined
       if (state === undefined) return
-      const after: Hr = { ...state, phase: 'armed', waitsForDrop: true, nudgedAt: undefined }
+      const after: Hr = {
+        ...state,
+        phase: 'armed',
+        waitsForDrop: true,
+        nudgedAt: undefined,
+        handoffAt: undefined,
+        workedSince: undefined,
+        isStale: undefined,
+      }
       // The clear wiped the store, so it reads as never armed. If the successor
       // already armed it through hr_watch, keep what it set.
       await update($, hr, (cur: Hr) => (isFresh(cur) || cur.phase === 'ready' ? after : cur))
@@ -813,6 +881,19 @@ export const register: Register = on => {
         if (JSON.stringify(reading) !== JSON.stringify(last)) await update($, gauge, () => reading)
         await nudgeAtThreshold(reading)
       })().catch(() => undefined)
+      // A ready handoff gone stale: mark it for the header, which has no clock,
+      // and toast once. Apart from the rest, so a throw here stops nothing else.
+      void (async () => {
+        const state = await read($, hr)
+        const at = await $.clock.now()
+        if (!isStaleHandoff(state, at) || state.isStale) return
+        let isMarked = false
+        await update($, hr, (cur: Hr) => {
+          isMarked = isStaleHandoff(cur, at) && !cur.isStale
+          return isMarked ? { ...cur, isStale: true } : cur
+        })
+        if (isMarked) $.ui.toast(HR_STALE_TOAST)
+      })().catch(() => undefined)
       // The clear and resume run here, off any hook, once a handoff was seen.
       void (async () => {
         if (isClearing) return
@@ -820,6 +901,9 @@ export const register: Register = on => {
         if (state.phase !== 'clearing') return
         isClearing = true
         isOffDuringClear = false
+        // The plugin's own clear sends the resume itself; a snapshot kept for
+        // the person's /clear would send a second one when the session restarts.
+        pendingResume = undefined
         try {
           // `state` was read before the clear; finishClear takes the handoff,
           // run folder, mode and threshold from it, never from the store.
@@ -1016,6 +1100,9 @@ export const register: Register = on => {
           // Nudge mode: keep the resume where a /clear cannot wipe it, for the
           // poll to send once the person has cleared.
           if (isStored && seen.phase === 'ready') pendingResume = seen
+        } else if (state.phase === 'ready') {
+          // Work went on after the handoff was written: it may now be stale.
+          await update($, hr, (cur: Hr) => (cur.phase === 'ready' ? { ...cur, workedSince: true } : cur))
         }
       } catch {
         // The watch stays nudged; the next main turn's end looks again.
@@ -1033,7 +1120,7 @@ export const register: Register = on => {
     const watch = await read($, hr)
     // Armed shows the mode (nudge or auto); every later phase shows itself.
     const hrPart =
-      watch.phase === 'off' ? '' : ` · HR ${watch.phase === 'armed' ? modeOf(watch) : watch.phase}`
+      watch.phase === 'off' ? '' : ` · HR ${watch.phase === 'armed' ? modeOf(watch) : watch.phase === 'ready' && watch.isStale ? 'ready (stale)' : watch.phase}`
     const width = Math.max(20, e.props.bodyColumns ?? 40)
     const viewing = e.props.view?.agentId
 
