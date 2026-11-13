@@ -66,6 +66,13 @@ export type Hr = {
   // as given to hr_watch or /hr-watch doc=. Absent: the resume prompt points at
   // the run-state file's "how to resume" section instead.
   workflowDoc?: string
+  // The modified time of the hand-off file the watch saw, in ms. Age is read from it.
+  handoffAt?: number
+  // Set when a main turn ends while the watch is ready: work went on after the hand-off.
+  workedSince?: boolean
+  // Set by the poll once a ready hand-off is stale (old, with work since), so the
+  // header, which has no clock of its own, can say so.
+  isStale?: boolean
 }
 
 declare module 'claude-code' {
