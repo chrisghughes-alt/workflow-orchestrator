@@ -3,6 +3,15 @@
 All notable changes to this project are documented here. This project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Changed
+- The context watch treats an old hand-off as stale: more than 5 minutes old, with at least one turn
+  finished since it was written. The header shows `HR ready (stale)` and a toast says that
+  `/hr-handoff` writes a fresh one. `/hr-handoff`, and switching a ready watch to auto, ask for a
+  fresh hand-off before clearing instead of clearing on the old one. Typing `/clear` yourself still
+  resumes from the old one.
+
 ## [2.3.0] — 2026-11-12
 
 ### Added
