@@ -63,7 +63,12 @@ event's bare result.
   because `workedSince` is set only on a turn end while the phase is already `ready`. `/hr-handoff`
   and `/hr-watch auto` on a stale `ready` watch go back to `armed` with `handsOffNow` set, and the poll
   asks for a fresh file. The poll also sets `isStale` and toasts once, because the pane header has no
-  clock of its own while no agent runs. Typing `/clear` is not intercepted.
+  clock of its own while no agent runs. Typing `/clear` is not intercepted. A main turn is any turn of
+  the main loop, including ones nobody typed (a cron prompt, a background agent's result arriving), so
+  during an orchestrated run a hand-off can go stale while the person is away; the cost is one extra
+  rewrite. The old hand-off's resume (`pendingResume`) is kept until the fresh one is seen, so the
+  person's own `/clear` in between still resumes from the old file; the poll drops it when the plugin
+  starts its own clear.
 - **Tests cannot set the plugin's stored state.** The `$` in a test is the engine's, not the plugin's.
   So the two steps worth testing alone, `seeHandoff` and `finishClear`, are exported and take their
   effects (list, toast, clear, submit) as arguments. The tests pass fakes and assert the call order.

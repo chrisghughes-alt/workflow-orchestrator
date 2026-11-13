@@ -381,7 +381,9 @@ async function changeWatch(
   if (stored === undefined) return 'HR: the watch changed while this ran. It is unchanged; try again.'
   // The plugin's own clear sends the resume prompt, so the one waiting for the
   // person's clear is dropped; kept, the clear would send it a second time.
-  if (isLeavingReady) pendingResume = undefined
+  // A stale handoff is not cleared on yet: its resume stays until the fresh
+  // file is seen, so the person's own /clear in between still resumes.
+  if (isLeavingReady && stored.phase === 'clearing') pendingResume = undefined
   else if (pendingResume !== undefined) pendingResume = { ...pendingResume, ...asked }
   if (mode === 'auto' && !CLEAR_ENABLED) return AUTO_DISABLED_TEXT
   return armedText(path, stored)
@@ -522,10 +524,9 @@ async function handOffNow($: Dollar): Promise<string> {
   })
   if (before?.phase === 'clearing') return 'HR: a clear and resume is already under way'
   if (before === undefined || stored === undefined) return 'HR: the watch changed while this ran. Nothing was done; try again.'
-  if (isStale) {
-    pendingResume = undefined
-    return HR_STALE_REPLY
-  }
+  // The old resume is kept until the fresh handoff is seen: if the person
+  // types /clear first, it still resumes from the old file.
+  if (isStale) return HR_STALE_REPLY
   if (before.phase === 'armed') {
     return CLEAR_ENABLED
       ? 'HR: handoff requested; the clear and resume follow once it is written'
@@ -542,7 +543,7 @@ async function handOffNow($: Dollar): Promise<string> {
     if (seen === asked) {
       // Asked before, yet the turn ended with no file: back to armed with the
       // flag kept, so the next poll asks again.
-      await update($, hr, (cur: Hr) => (cur.phase === 'nudged' ? { ...cur, phase: 'armed' } : cur))
+      await update($, hr, (cur: Hr): Hr => (cur.phase === 'nudged' ? { ...cur, phase: 'armed' } : cur))
       return 'HR: no handoff written yet; requested again, and the clear and resume follow once it is written'
     }
     let isStored = false
@@ -888,7 +889,7 @@ export const register: Register = on => {
         if (!isStaleHandoff(state, at) || state.isStale) return
         let isMarked = false
         await update($, hr, (cur: Hr) => {
-          isMarked = cur.phase === 'ready' && !cur.isStale
+          isMarked = isStaleHandoff(cur, at) && !cur.isStale
           return isMarked ? { ...cur, isStale: true } : cur
         })
         if (isMarked) $.ui.toast(HR_STALE_TOAST)
@@ -900,6 +901,9 @@ export const register: Register = on => {
         if (state.phase !== 'clearing') return
         isClearing = true
         isOffDuringClear = false
+        // The plugin's own clear sends the resume itself; a snapshot kept for
+        // the person's /clear would send a second one when the session restarts.
+        pendingResume = undefined
         try {
           // `state` was read before the clear; finishClear takes the handoff,
           // run folder, mode and threshold from it, never from the store.
@@ -1099,7 +1103,6 @@ export const register: Register = on => {
         } else if (state.phase === 'ready') {
           // Work went on after the handoff was written: it may now be stale.
           await update($, hr, (cur: Hr) => (cur.phase === 'ready' ? { ...cur, workedSince: true } : cur))
-          if (pendingResume !== undefined) pendingResume = { ...pendingResume, workedSince: true }
         }
       } catch {
         // The watch stays nudged; the next main turn's end looks again.
