@@ -265,6 +265,13 @@ function hrEngine(on: Parameters<TestBody>[1], run = RUN, root = ROOT) {
   // and Linux (expected, not yet observed).
   const same = (p: string, want: string) =>
     p === want || p.replace(/^[A-Za-z]:/, '').replaceAll('\\', '/') === want
+  // And the other way round: on macOS and Linux the engine takes a Windows path
+  // for a relative one and hands it over with the working folder in front
+  // (/work/C:\runs\r1, as observed on Linux). Cut that off.
+  const asGiven = (p: string) => {
+    const at = p.search(/[\\/][A-Za-z]:\\/)
+    return p.startsWith('/') && at >= 0 ? p.slice(at + 1) : p
+  }
   const isRun = (p: string, tail = '') => same(p, run + tail)
   const sub = run.includes('\\') ? '\\handoffs' : '/handoffs'
   const clock = mock.clock(on)
@@ -287,9 +294,10 @@ function hrEngine(on: Parameters<TestBody>[1], run = RUN, root = ROOT) {
   }
   on('session.root', () => ({ value: root }))
   on('fs.write', (_, e) => {
-    world.written.push(e.path)
+    const path = asGiven(e.path)
+    world.written.push(path)
     // Like the engine, a write creates the folders above the file.
-    const parts = e.path.split('\\')
+    const parts = path.split('\\')
     for (let i = 1; i < parts.length; i++) world.dirs.push(parts.slice(0, i).join('\\'))
     return { value: undefined }
   })
@@ -306,10 +314,11 @@ function hrEngine(on: Parameters<TestBody>[1], run = RUN, root = ROOT) {
     return { value: undefined }
   })
   on('session.start', (_, e) => ({ cwd: e.cwd }))
-  on('fs.exists', (_, e) => ({
-    value: isRun(e.path) || world.docs.some(d => same(e.path, d)) || world.dirs.includes(e.path),
-  }))
-  on('fs.list', (_, e) => ({ value: isRun(e.path, sub) ? world.handoffs : [] }))
+  on('fs.exists', (_, e) => {
+    const path = asGiven(e.path)
+    return { value: isRun(path) || world.docs.some(d => same(path, d)) || world.dirs.includes(path) }
+  })
+  on('fs.list', (_, e) => ({ value: isRun(asGiven(e.path), sub) ? world.handoffs : [] }))
   on('prompt.submit', (_, e) => {
     world.submits.push(e.text)
     return { text: e.text }
